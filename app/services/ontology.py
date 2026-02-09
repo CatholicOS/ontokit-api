@@ -397,6 +397,67 @@ class OntologyService:
             if isinstance(s, URIRef) and s != OWL.Thing
         )
 
+    async def get_ancestor_path(
+        self,
+        project_id: UUID,
+        class_iri: str,
+        label_preferences: list[str] | None = None,
+    ) -> list[OWLClassTreeNode]:
+        """
+        Get the path from root to a specific class.
+
+        Returns a list of tree nodes starting from the root class down to
+        (but not including) the target class. This is useful for expanding
+        the tree to reveal a specific class.
+
+        Returns an empty list if the class is a root class or not found.
+        """
+        graph = await self._get_graph(project_id)
+        target_uri = URIRef(class_iri)
+        owl_thing = OWL.Thing
+
+        # Check if target class exists
+        if (target_uri, RDF.type, OWL.Class) not in graph:
+            return []
+
+        # Build ancestor path by traversing upward
+        path: list[URIRef] = []
+        visited: set[str] = set()
+        current = target_uri
+
+        while True:
+            if str(current) in visited:
+                # Circular hierarchy - break
+                break
+            visited.add(str(current))
+
+            # Get parents
+            parents = [
+                p for p in graph.objects(current, RDFS.subClassOf)
+                if isinstance(p, URIRef) and p != owl_thing
+            ]
+
+            if not parents:
+                # Reached a root class
+                break
+
+            # Use first parent for the path (in complex hierarchies,
+            # a class might have multiple parents - we pick one path)
+            parent = parents[0]
+            path.append(parent)
+            current = parent
+
+        # Reverse to get root-to-target order
+        path.reverse()
+
+        # Convert to tree nodes
+        result = []
+        for uri in path:
+            response = await self._class_to_response(graph, uri, label_preferences)
+            result.append(self._class_to_tree_node(response, label_preferences))
+
+        return result
+
     async def get_root_tree_nodes(
         self,
         project_id: UUID,

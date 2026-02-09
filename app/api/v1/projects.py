@@ -355,6 +355,29 @@ async def get_ontology_class(
     return result
 
 
+@router.get("/{project_id}/ontology/tree/{class_iri:path}/ancestors", response_model=OWLClassTreeResponse)
+async def get_ontology_class_ancestors(
+    project_id: UUID,
+    class_iri: str,
+    service: Annotated[ProjectService, Depends(get_service)],
+    ontology: Annotated[OntologyService, Depends(get_ontology)],
+    user: OptionalUser,
+) -> OWLClassTreeResponse:
+    """
+    Get the ancestor path from root to a specific class.
+
+    Returns a list of tree nodes representing the path from the root
+    down to (but not including) the target class. This is useful for
+    expanding the tree view to reveal a specific class.
+    """
+    project = await _ensure_ontology_loaded(project_id, service, ontology, user)
+
+    nodes = await ontology.get_ancestor_path(project_id, class_iri, project.label_preferences)
+    total_classes = await ontology.get_class_count(project_id)
+
+    return OWLClassTreeResponse(nodes=nodes, total_classes=total_classes)
+
+
 # Revision history endpoints
 
 
