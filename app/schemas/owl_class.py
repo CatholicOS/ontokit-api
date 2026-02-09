@@ -42,6 +42,14 @@ class OWLClassUpdate(BaseModel):
     disjoint_iris: list[HttpUrl] | None = None
 
 
+class AnnotationProperty(BaseModel):
+    """An annotation property with its values."""
+
+    property_iri: str = Field(..., description="Full IRI of the annotation property")
+    property_label: str = Field(..., description="Human-readable label (e.g., 'dc:creator')")
+    values: list[LocalizedString] = Field(default_factory=list)
+
+
 class OWLClassResponse(OWLClassBase):
     """Schema for OWL class responses."""
 
@@ -56,6 +64,10 @@ class OWLClassResponse(OWLClassBase):
     instance_count: int = 0
     is_defined: bool = True  # vs just declared
     source_ontology: str | None = None  # If imported
+    annotations: list[AnnotationProperty] = Field(
+        default_factory=list,
+        description="Additional annotation properties (DC, SKOS, etc.)",
+    )
 
     class Config:
         from_attributes = True

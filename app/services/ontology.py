@@ -14,6 +14,7 @@ from app.schemas.ontology import (
     OntologyUpdate,
 )
 from app.schemas.owl_class import (
+    AnnotationProperty,
     OWLClassCreate,
     OWLClassResponse,
     OWLClassUpdate,
@@ -52,6 +53,40 @@ LABEL_PROPERTY_MAP = {
 
 # Default label preferences if none specified
 DEFAULT_LABEL_PREFERENCES = ["rdfs:label@en", "rdfs:label", "skos:prefLabel@en", "skos:prefLabel"]
+
+# Common annotation properties to extract for class details
+# (excludes rdfs:label and rdfs:comment which are handled separately)
+ANNOTATION_PROPERTIES = {
+    # Dublin Core Elements
+    "dc:creator": URIRef("http://purl.org/dc/elements/1.1/creator"),
+    "dc:contributor": URIRef("http://purl.org/dc/elements/1.1/contributor"),
+    "dc:date": URIRef("http://purl.org/dc/elements/1.1/date"),
+    "dc:source": URIRef("http://purl.org/dc/elements/1.1/source"),
+    "dc:rights": URIRef("http://purl.org/dc/elements/1.1/rights"),
+    "dc:subject": URIRef("http://purl.org/dc/elements/1.1/subject"),
+    "dc:title": URIRef("http://purl.org/dc/elements/1.1/title"),
+    "dc:description": URIRef("http://purl.org/dc/elements/1.1/description"),
+    # Dublin Core Terms
+    "dcterms:creator": URIRef("http://purl.org/dc/terms/creator"),
+    "dcterms:created": URIRef("http://purl.org/dc/terms/created"),
+    "dcterms:modified": URIRef("http://purl.org/dc/terms/modified"),
+    "dcterms:title": URIRef("http://purl.org/dc/terms/title"),
+    "dcterms:description": URIRef("http://purl.org/dc/terms/description"),
+    # SKOS
+    "skos:prefLabel": SKOS.prefLabel,
+    "skos:altLabel": SKOS.altLabel,
+    "skos:definition": SKOS.definition,
+    "skos:notation": SKOS.notation,
+    "skos:example": SKOS.example,
+    "skos:note": SKOS.note,
+    "skos:scopeNote": SKOS.scopeNote,
+    "skos:historyNote": SKOS.historyNote,
+    "skos:editorialNote": SKOS.editorialNote,
+    "skos:changeNote": SKOS.changeNote,
+    # Other common RDFS/OWL
+    "rdfs:seeAlso": RDFS.seeAlso,
+    "rdfs:isDefinedBy": RDFS.isDefinedBy,
+}
 
 
 @dataclass
@@ -559,6 +594,26 @@ class OntologyService:
             if isinstance(_, URIRef)
         )
 
+        # Extract additional annotation properties (DC, SKOS, etc.)
+        annotations = []
+        for prop_label, prop_uri in ANNOTATION_PROPERTIES.items():
+            values = []
+            for obj in graph.objects(class_uri, prop_uri):
+                if isinstance(obj, RDFLiteral):
+                    values.append(LocalizedString(
+                        value=str(obj),
+                        lang=obj.language or ""
+                    ))
+                elif isinstance(obj, URIRef):
+                    # For URI values, store as string with empty lang
+                    values.append(LocalizedString(value=str(obj), lang=""))
+            if values:
+                annotations.append(AnnotationProperty(
+                    property_iri=str(prop_uri),
+                    property_label=prop_label,
+                    values=values
+                ))
+
         return OWLClassResponse(
             iri=str(class_uri),
             labels=labels,
@@ -570,6 +625,7 @@ class OntologyService:
             disjoint_iris=[],
             child_count=child_count,
             instance_count=instance_count,
+            annotations=annotations,
         )
 
 
