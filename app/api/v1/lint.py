@@ -357,6 +357,7 @@ async def get_lint_issues(
     user: OptionalUser,
     issue_type: str | None = Query(default=None, description="Filter by issue type (error, warning, info)"),
     rule_id: str | None = Query(default=None, description="Filter by rule ID"),
+    subject_iri: str | None = Query(default=None, description="Filter by subject IRI (the class/property the issue relates to)"),
     include_resolved: bool = Query(default=False, description="Include resolved issues"),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
@@ -389,6 +390,9 @@ async def get_lint_issues(
 
     if rule_id:
         query = query.where(LintIssue.rule_id == rule_id)
+
+    if subject_iri:
+        query = query.where(LintIssue.subject_iri == subject_iri)
 
     if not include_resolved:
         query = query.where(LintIssue.resolved_at.is_(None))
