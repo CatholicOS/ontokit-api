@@ -1,15 +1,13 @@
-# Axigraph Development Stack
-# Run with: docker compose up -d
+# Axigraph Production Infrastructure Stack
+# Run with: docker compose -f compose.prod.yaml up -d
 #
-# This configuration runs ALL services in Docker containers (development mode).
-# For production deployment, see compose.prod.yaml
+# This configuration runs ONLY infrastructure services in Docker.
+# Application services (API, frontend) run directly on the host machine.
 #
-# After starting, access:
-#   - Axigraph API: http://localhost:8000
-#   - Zitadel Console: http://localhost:8080/ui/console
-#   - MinIO Console: http://localhost:9001
-#
-# Default Zitadel admin: admin@Axigraph.localhost / Admin123!
+# Use this for:
+#   - Production deployments where you want more control
+#   - Development when you want to run the API outside Docker
+#   - Debugging with hot reload and IDE integration
 
 services:
   # ============================================================================
@@ -21,11 +19,11 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: postgres
       PGUSER: postgres
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
@@ -44,8 +42,9 @@ services:
     image: redis:7-alpine
     container_name: axigraph-redis
     restart: unless-stopped
+    command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -57,7 +56,7 @@ services:
       - axigraph
 
   # ============================================================================
-  # MinIO for object storage (ontology files, exports, etc.)
+  # MinIO for object storage
   # ============================================================================
   minio:
     image: minio/minio:latest
@@ -65,11 +64,11 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minio
-      MINIO_ROOT_PASSWORD: minio123
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio123}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -87,51 +86,51 @@ services:
     image: ghcr.io/zitadel/zitadel:latest
     container_name: axigraph-zitadel
     restart: unless-stopped
-    command: 'start-from-init --masterkey "MasterkeyNeedsToHave32Characters"'
+    command: 'start-from-init --masterkey "${ZITADEL_MASTERKEY:-MasterkeyNeedsToHave32Characters}"'
     environment:
-      ZITADEL_EXTERNALDOMAIN: localhost
-      ZITADEL_EXTERNALSECURE: false
-      ZITADEL_TLS_ENABLED: false
+      ZITADEL_EXTERNALDOMAIN: ${ZITADEL_DOMAIN:-localhost}
+      ZITADEL_EXTERNALSECURE: ${ZITADEL_SECURE:-false}
+      ZITADEL_TLS_ENABLED: ${ZITADEL_TLS:-false}
 
-      # Database configuration (using shared postgres)
+      # Database configuration
       ZITADEL_DATABASE_POSTGRES_HOST: postgres
       ZITADEL_DATABASE_POSTGRES_PORT: 5432
       ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
       ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: postgres
-      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: postgres
+      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
       ZITADEL_DATABASE_POSTGRES_USER_USERNAME: zitadel
-      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: ${ZITADEL_DB_PASSWORD:-zitadel}
       ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
 
-      # Login V2 client machine user (creates PAT for login container)
+      # Login V2 configuration
       ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH: /zitadel-data/login-client.pat
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: false
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: ${ZITADEL_REQUIRE_PASSWORD_CHANGE:-true}
       ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME: login-client
       ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME: Login V2 Client
       ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE: '2030-01-01T00:00:00Z'
 
       # Enable Login V2
       ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: true
-      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI: http://localhost:8081/ui/v2/login
-      ZITADEL_OIDC_DEFAULTLOGINURLV2: http://localhost:8081/ui/v2/login/login?authRequest=
-      ZITADEL_OIDC_DEFAULTLOGOUTURLV2: http://localhost:8081/ui/v2/login/logout?post_logout_redirect=
-      ZITADEL_SAML_DEFAULTLOGINURLV2: http://localhost:8081/ui/v2/login/login?samlRequest=
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI: ${ZITADEL_LOGIN_URL:-http://localhost:8081}/ui/v2/login
+      ZITADEL_OIDC_DEFAULTLOGINURLV2: ${ZITADEL_LOGIN_URL:-http://localhost:8081}/ui/v2/login/login?authRequest=
+      ZITADEL_OIDC_DEFAULTLOGOUTURLV2: ${ZITADEL_LOGIN_URL:-http://localhost:8081}/ui/v2/login/logout?post_logout_redirect=
+      ZITADEL_SAML_DEFAULTLOGINURLV2: ${ZITADEL_LOGIN_URL:-http://localhost:8081}/ui/v2/login/login?samlRequest=
 
-      # Admin machine user (creates PAT for API access)
+      # Admin machine user
       ZITADEL_FIRSTINSTANCE_PATPATH: /zitadel-data/admin.pat
       ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: api-admin
       ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: API Admin Machine User
       ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE: '2030-01-01T00:00:00Z'
 
       # Human admin user
-      ZITADEL_FIRSTINSTANCE_ORG_NAME: "Axigraph"
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: Admin123!
+      ZITADEL_FIRSTINSTANCE_ORG_NAME: ${ZITADEL_ORG_NAME:-Axigraph}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: ${ZITADEL_ADMIN_USER:-admin}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: ${ZITADEL_ADMIN_PASSWORD:-Admin123!}
 
-      # Debug logging
-      ZITADEL_LOG_LEVEL: debug
-      ZITADEL_LOGSTORE_ACCESS_STDOUT_ENABLED: true
+      # Logging (reduce in production)
+      ZITADEL_LOG_LEVEL: ${ZITADEL_LOG_LEVEL:-info}
+      ZITADEL_LOGSTORE_ACCESS_STDOUT_ENABLED: ${ZITADEL_ACCESS_LOG:-false}
 
     healthcheck:
       test: ["CMD", "/app/zitadel", "ready"]
@@ -143,8 +142,8 @@ services:
     volumes:
       - zitadel_data:/zitadel-data
     ports:
-      - "8080:8080"
-      - "8081:3000"
+      - "${ZITADEL_PORT:-8080}:8080"
+      - "${ZITADEL_LOGIN_PORT:-8081}:3000"
     networks:
       - axigraph
     depends_on:
@@ -157,7 +156,7 @@ services:
     container_name: axigraph-zitadel-login
     restart: unless-stopped
     environment:
-      ZITADEL_API_URL: http://localhost:8080
+      ZITADEL_API_URL: ${ZITADEL_URL:-http://localhost:8080}
       NEXT_PUBLIC_BASE_PATH: /ui/v2/login
       ZITADEL_SERVICE_USER_TOKEN_FILE: /zitadel-data/login-client.pat
       EMAIL_VERIFICATION: true
@@ -179,58 +178,6 @@ services:
       zitadel:
         condition: service_healthy
         restart: false
-
-  # ============================================================================
-  # Axigraph API (FastAPI backend)
-  # ============================================================================
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: axigraph/api:latest
-    container_name: axigraph-api
-    restart: unless-stopped
-    environment:
-      APP_ENV: development
-      DEBUG: "true"
-      SECRET_KEY: dev-secret-key-change-in-production
-      HOST: 0.0.0.0
-      PORT: 8000
-      # Database - connects to shared postgres container
-      DATABASE_URL: postgresql+asyncpg://axigraph:axigraph@postgres:5432/axigraph
-      # Redis
-      REDIS_URL: redis://redis:6379/0
-      # MinIO
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minio
-      MINIO_SECRET_KEY: minio123
-      MINIO_BUCKET: axigraph
-      MINIO_SECURE: "false"
-      # Zitadel
-      ZITADEL_ISSUER: http://localhost:8080
-      ZITADEL_INTERNAL_URL: http://zitadel:8080
-      ZITADEL_CLIENT_ID: ${ZITADEL_CLIENT_ID:-}
-      ZITADEL_CLIENT_SECRET: ${ZITADEL_CLIENT_SECRET:-}
-      # CORS
-      CORS_ORIGINS: '["http://localhost:3000","http://localhost:5173"]'
-    ports:
-      - "8000:8000"
-    volumes:
-      # Mount source code for hot reload in development
-      - ./app:/home/axigraph/app/app:ro
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      start_period: 5s
-      retries: 3
-    networks:
-      - axigraph
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
 
 networks:
   axigraph:

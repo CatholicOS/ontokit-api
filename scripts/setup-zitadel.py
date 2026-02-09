@@ -46,36 +46,39 @@ def wait_for_zitadel(max_attempts: int = 30) -> bool:
 
 
 def get_admin_token() -> str:
-    """Get an admin access token."""
+    """Get an admin access token from the PAT file created during Zitadel init."""
     print("Getting admin token...")
 
-    # First, we need to get a PAT or use the admin login
-    # For simplicity, we'll use the machine user approach via service account
+    # Try to get PAT from Docker volume
+    import subprocess
 
-    # Get the admin user's PAT by logging in
-    with httpx.Client(base_url=ZITADEL_URL, timeout=30) as client:
-        # Login to get session
-        login_resp = client.post(
-            "/oauth/v2/token",
-            data={
-                "grant_type": "password",
-                "username": ADMIN_USERNAME,
-                "password": ADMIN_PASSWORD,
-                "scope": "openid profile email urn:zitadel:iam:org:project:id:zitadel:aud",
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+    try:
+        result = subprocess.run(
+            ["docker", "cp", "axigraph-zitadel:/zitadel-data/admin.pat", "/tmp/admin.pat"],
+            capture_output=True,
+            text=True,
         )
+        if result.returncode == 0:
+            with open("/tmp/admin.pat", "r") as f:
+                pat = f.read().strip()
+                if pat:
+                    print("  Using PAT from Zitadel container")
+                    return pat
+    except Exception as e:
+        print(f"  Could not get PAT from container: {e}")
 
-        if login_resp.status_code != 200:
-            # Try with client credentials if password grant isn't available
-            print(f"Password grant failed: {login_resp.text}")
-            print("You may need to create a service account manually in Zitadel console.")
-            print(f"Access Zitadel at: {ZITADEL_URL}")
-            print(f"Login with: {ADMIN_USERNAME} / {ADMIN_PASSWORD}")
-            sys.exit(1)
+    # Fallback: check environment variable
+    import os
+    pat = os.environ.get("ZITADEL_ADMIN_PAT")
+    if pat:
+        print("  Using PAT from environment variable")
+        return pat
 
-        token_data = login_resp.json()
-        return token_data["access_token"]
+    print("ERROR: Could not get admin PAT.")
+    print("You may need to create applications manually in Zitadel console.")
+    print(f"Access Zitadel at: {ZITADEL_URL}")
+    print(f"Login with: {ADMIN_USERNAME} / {ADMIN_PASSWORD}")
+    sys.exit(1)
 
 
 def create_project(client: httpx.Client, token: str) -> str:
@@ -86,8 +89,8 @@ def create_project(client: httpx.Client, token: str) -> str:
         "/management/v1/projects",
         json={
             "name": "Axigraph",
-            "projectRoleAssertion": True,
-            "projectRoleCheck": True,
+            "projectRoleAssertion": False,  # Don't require role assertion in tokens
+            "projectRoleCheck": False,  # Don't check user grants on login (simpler for dev)
         },
         headers={"Authorization": f"Bearer {token}"},
     )

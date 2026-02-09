@@ -44,8 +44,14 @@ class Settings(BaseSettings):
 
     # Zitadel Authentication
     zitadel_issuer: str = "http://localhost:8080"
+    zitadel_internal_url: str | None = None  # Internal URL for JWKS fetch (defaults to issuer)
     zitadel_client_id: str = ""
     zitadel_client_secret: str = ""
+
+    @property
+    def zitadel_jwks_base_url(self) -> str:
+        """URL to use for fetching JWKS (internal URL in Docker, issuer otherwise)."""
+        return self.zitadel_internal_url or self.zitadel_issuer
 
     # CORS
     cors_origins: list[str] = Field(default=["http://localhost:3000"])

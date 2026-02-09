@@ -50,17 +50,32 @@ async def get_jwks() -> dict:
     if _jwks_cache is not None:
         return _jwks_cache
 
+    # Build headers - if using internal URL, set Host header to match external domain
+    # This is needed because Zitadel validates the Host header against its external domain
+    headers = {}
+    if settings.zitadel_internal_url:
+        # Extract host from issuer URL (e.g., "localhost:8080" from "http://localhost:8080")
+        from urllib.parse import urlparse
+
+        parsed = urlparse(settings.zitadel_issuer)
+        headers["Host"] = parsed.netloc
+
     async with httpx.AsyncClient() as client:
         # Fetch OpenID configuration
-        oidc_config_url = f"{settings.zitadel_issuer}/.well-known/openid-configuration"
+        # Use internal URL for Docker-to-Docker communication
+        base_url = settings.zitadel_jwks_base_url
+        oidc_config_url = f"{base_url}/.well-known/openid-configuration"
         try:
-            resp = await client.get(oidc_config_url)
+            resp = await client.get(oidc_config_url, headers=headers)
             resp.raise_for_status()
             oidc_config = resp.json()
 
-            # Fetch JWKS
+            # Fetch JWKS - replace issuer URL with internal URL if needed
             jwks_uri = oidc_config["jwks_uri"]
-            resp = await client.get(jwks_uri)
+            if settings.zitadel_internal_url:
+                # Replace the external issuer URL with internal URL in jwks_uri
+                jwks_uri = jwks_uri.replace(settings.zitadel_issuer, settings.zitadel_internal_url)
+            resp = await client.get(jwks_uri, headers=headers)
             resp.raise_for_status()
             _jwks_cache = resp.json()
             return _jwks_cache
