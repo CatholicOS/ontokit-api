@@ -515,11 +515,13 @@ class OntologyService:
         labels = [
             LocalizedString(value=str(label), lang=label.language or "en")
             for label in graph.objects(class_uri, RDFS.label)
+            if isinstance(label, RDFLiteral)
         ]
 
         comments = [
             LocalizedString(value=str(comment), lang=comment.language or "en")
             for comment in graph.objects(class_uri, RDFS.comment)
+            if isinstance(comment, RDFLiteral)
         ]
 
         parent_iris = [str(p) for p in graph.objects(class_uri, RDFS.subClassOf) if isinstance(p, URIRef)]
