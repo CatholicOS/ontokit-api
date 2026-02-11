@@ -152,6 +152,8 @@ class RevisionCommit(BaseModel):
     author_name: str
     author_email: str
     timestamp: str
+    is_merge: bool = False
+    merged_branch: str | None = None
 
 
 class RevisionHistoryResponse(BaseModel):

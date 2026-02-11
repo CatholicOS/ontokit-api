@@ -25,6 +25,8 @@ class CommitInfo:
     author_name: str
     author_email: str
     timestamp: str
+    is_merge: bool = False
+    merged_branch: str | None = None
 
 
 @dataclass
@@ -139,9 +141,23 @@ class OntologyRepository:
 
     def get_history(self, limit: int = 50) -> list[CommitInfo]:
         """Get commit history."""
+        import re
+
         commits = []
         try:
             for commit in self.repo.iter_commits(max_count=limit):
+                # Detect merge commits (commits with multiple parents)
+                is_merge = len(commit.parents) > 1
+                merged_branch = None
+
+                if is_merge:
+                    # Try to extract branch name from merge commit message
+                    # Common formats: "Merge branch 'feature/x'" or "Merge branch 'feature/x' into main"
+                    message = commit.message.strip()
+                    match = re.search(r"Merge branch '([^']+)'", message)
+                    if match:
+                        merged_branch = match.group(1)
+
                 commits.append(
                     CommitInfo(
                         hash=commit.hexsha,
@@ -150,6 +166,8 @@ class OntologyRepository:
                         author_name=str(commit.author.name) if commit.author else "Unknown",
                         author_email=str(commit.author.email) if commit.author else "",
                         timestamp=commit.committed_datetime.isoformat(),
+                        is_merge=is_merge,
+                        merged_branch=merged_branch,
                     )
                 )
         except ValueError:
