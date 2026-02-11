@@ -129,6 +129,8 @@ class PullRequestComment(Base):
 
     # Author (Zitadel user ID)
     author_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    author_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    author_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Comment content
     body: Mapped[str] = mapped_column(Text, nullable=False)

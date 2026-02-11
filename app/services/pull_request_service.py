@@ -498,6 +498,8 @@ class PullRequestService:
         db_comment = PullRequestComment(
             pull_request_id=pr.id,
             author_id=user.id,
+            author_name=user.name,
+            author_email=user.email,
             body=comment_create.body,
             parent_id=comment_create.parent_id,
         )
@@ -1279,7 +1281,11 @@ class PullRequestService:
             id=comment.id,
             pull_request_id=comment.pull_request_id,
             author_id=comment.author_id,
-            author=PRUser(id=comment.author_id),
+            author=PRUser(
+                id=comment.author_id,
+                name=comment.author_name,
+                email=comment.author_email,
+            ),
             body=comment.body,
             parent_id=comment.parent_id,
             github_comment_id=comment.github_comment_id,
