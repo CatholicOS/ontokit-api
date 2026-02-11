@@ -186,3 +186,36 @@ class RevisionFileResponse(BaseModel):
     version: str
     filename: str
     content: str
+
+
+# Branch Schemas
+
+
+class BranchInfo(BaseModel):
+    """Information about a git branch."""
+
+    name: str
+    is_current: bool = False
+    is_default: bool = False
+    commit_hash: str | None = None
+    commit_message: str | None = None
+    commit_date: datetime | None = None
+    commits_ahead: int = 0
+    commits_behind: int = 0
+
+
+class BranchCreate(BaseModel):
+    """Schema for creating a new branch."""
+
+    name: str = Field(..., min_length=1, max_length=255)
+    from_branch: str | None = Field(
+        None, description="Branch to create from (defaults to current branch)"
+    )
+
+
+class BranchListResponse(BaseModel):
+    """List of branches for a project."""
+
+    items: list[BranchInfo]
+    current_branch: str
+    default_branch: str

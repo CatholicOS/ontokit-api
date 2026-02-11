@@ -11,6 +11,9 @@ from app.core.database import get_db
 from app.schemas.owl_class import OWLClassResponse, OWLClassTreeNode, OWLClassTreeResponse
 from app.git import GitRepositoryService, get_git_service
 from app.schemas.project import (
+    BranchCreate,
+    BranchInfo,
+    BranchListResponse,
     MemberCreate,
     MemberListResponse,
     MemberResponse,
@@ -517,3 +520,202 @@ async def get_revision_diff(
             for c in diff.changes
         ],
     )
+
+
+# Branch endpoints
+
+
+@router.get("/{project_id}/branches", response_model=BranchListResponse)
+async def list_branches(
+    project_id: UUID,
+    service: Annotated[ProjectService, Depends(get_service)],
+    git: Annotated[GitRepositoryService, Depends(get_git)],
+    user: OptionalUser,
+) -> BranchListResponse:
+    """
+    List all branches for a project.
+
+    Returns a list of branches with their metadata including commits ahead/behind.
+    """
+    # Check project access
+    await service.get(project_id, user)
+
+    # Check if repository exists
+    if not git.repository_exists(project_id):
+        return BranchListResponse(
+            items=[],
+            current_branch="main",
+            default_branch="main",
+        )
+
+    branches = git.list_branches(project_id)
+
+    return BranchListResponse(
+        items=[
+            BranchInfo(
+                name=b.name,
+                is_current=b.is_current,
+                is_default=b.is_default,
+                commit_hash=b.commit_hash,
+                commit_message=b.commit_message,
+                commit_date=b.commit_date,
+                commits_ahead=b.commits_ahead,
+                commits_behind=b.commits_behind,
+            )
+            for b in branches
+        ],
+        current_branch=git.get_current_branch(project_id),
+        default_branch=git.get_default_branch(project_id),
+    )
+
+
+@router.post("/{project_id}/branches", response_model=BranchInfo, status_code=status.HTTP_201_CREATED)
+async def create_branch(
+    project_id: UUID,
+    branch: BranchCreate,
+    service: Annotated[ProjectService, Depends(get_service)],
+    git: Annotated[GitRepositoryService, Depends(get_git)],
+    user: RequiredUser,
+) -> BranchInfo:
+    """
+    Create a new branch.
+
+    Requires authentication and editor or higher role.
+    """
+    # Check project access (will raise 403 if user doesn't have access)
+    project = await service.get(project_id, user)
+
+    # Check if user has at least editor role
+    if project.user_role not in ("owner", "admin", "editor"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Must be an editor or higher to create branches",
+        )
+
+    # Check if repository exists
+    if not git.repository_exists(project_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No repository found for this project",
+        )
+
+    try:
+        from_ref = branch.from_branch or "HEAD"
+        result = git.create_branch(project_id, branch.name, from_ref)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not create branch: {e}",
+        )
+
+    return BranchInfo(
+        name=result.name,
+        is_current=result.is_current,
+        is_default=result.is_default,
+        commit_hash=result.commit_hash,
+        commit_message=result.commit_message,
+        commit_date=result.commit_date,
+        commits_ahead=result.commits_ahead,
+        commits_behind=result.commits_behind,
+    )
+
+
+@router.post("/{project_id}/branches/{branch_name:path}/checkout", response_model=BranchInfo)
+async def checkout_branch(
+    project_id: UUID,
+    branch_name: str,
+    service: Annotated[ProjectService, Depends(get_service)],
+    git: Annotated[GitRepositoryService, Depends(get_git)],
+    user: RequiredUser,
+) -> BranchInfo:
+    """
+    Switch to a different branch.
+
+    Requires authentication and editor or higher role.
+    """
+    # Check project access
+    project = await service.get(project_id, user)
+
+    # Check if user has at least editor role
+    if project.user_role not in ("owner", "admin", "editor"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Must be an editor or higher to switch branches",
+        )
+
+    # Check if repository exists
+    if not git.repository_exists(project_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No repository found for this project",
+        )
+
+    try:
+        result = git.switch_branch(project_id, branch_name)
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Branch not found: {branch_name}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not switch to branch: {e}",
+        )
+
+    return BranchInfo(
+        name=result.name,
+        is_current=result.is_current,
+        is_default=result.is_default,
+        commit_hash=result.commit_hash,
+        commit_message=result.commit_message,
+        commit_date=result.commit_date,
+        commits_ahead=result.commits_ahead,
+        commits_behind=result.commits_behind,
+    )
+
+
+@router.delete("/{project_id}/branches/{branch_name:path}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_branch(
+    project_id: UUID,
+    branch_name: str,
+    service: Annotated[ProjectService, Depends(get_service)],
+    git: Annotated[GitRepositoryService, Depends(get_git)],
+    user: RequiredUser,
+    force: bool = Query(default=False, description="Force delete even if branch has unmerged changes"),
+) -> None:
+    """
+    Delete a branch.
+
+    Cannot delete the current branch or the default branch.
+    Requires authentication and editor or higher role.
+    """
+    # Check project access
+    project = await service.get(project_id, user)
+
+    # Check if user has at least editor role
+    if project.user_role not in ("owner", "admin", "editor"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Must be an editor or higher to delete branches",
+        )
+
+    # Check if repository exists
+    if not git.repository_exists(project_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No repository found for this project",
+        )
+
+    try:
+        git.delete_branch(project_id, branch_name, force=force)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Branch not found: {branch_name}",
+        )
