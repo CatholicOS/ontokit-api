@@ -858,9 +858,24 @@ class PullRequestService:
         pr = await self._get_pr(project_id, pr_number)
 
         # Get diff between target and source branches
-        diff_info = self.git_service.diff_versions(
-            project_id, pr.target_branch, pr.source_branch
-        )
+        try:
+            diff_info = self.git_service.diff_versions(
+                project_id, pr.target_branch, pr.source_branch
+            )
+        except ValueError as e:
+            # Branch may have been deleted after merge
+            if pr.status == "merged":
+                # Return empty diff for merged PRs with deleted branches
+                return PRDiffResponse(
+                    files=[],
+                    total_additions=0,
+                    total_deletions=0,
+                    files_changed=0,
+                )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot compute diff: {e}",
+            )
 
         # Map change types
         change_type_map = {
