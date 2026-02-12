@@ -41,6 +41,9 @@ class NormalizationRunResponse(BaseModel):
     report: NormalizationReportResponse
     is_dry_run: bool
     commit_hash: str | None = None
+    # For dry runs, include content for diff preview
+    original_content: str | None = None
+    normalized_content: str | None = None
 
 
 class NormalizationHistoryResponse(BaseModel):
@@ -147,7 +150,7 @@ async def run_normalization(
     db_project = await project_service._get_project(project_id)
 
     try:
-        run = await norm_service.run_normalization(
+        run, original_content, normalized_content = await norm_service.run_normalization(
             project=db_project,
             user=user,
             trigger_type="manual",
@@ -175,6 +178,8 @@ async def run_normalization(
         report=NormalizationReportResponse(**report_data),
         is_dry_run=run.is_dry_run,
         commit_hash=run.commit_hash,
+        original_content=original_content,
+        normalized_content=normalized_content,
     )
 
 

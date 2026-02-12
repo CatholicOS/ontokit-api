@@ -182,7 +182,11 @@ class NormalizationService:
             f"run_id={run.id}, changed={content_changed}"
         )
 
-        return run
+        # For dry runs, also return the content for diff preview
+        if dry_run:
+            return run, content.decode("utf-8"), normalized_content.decode("utf-8")
+
+        return run, None, None
 
     async def get_normalization_history(
         self, project_id: UUID, limit: int = 10, include_dry_runs: bool = False
