@@ -7,10 +7,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies
+# Install system dependencies (including libgit2 for pygit2)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
+    libgit2-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user and git repos directory

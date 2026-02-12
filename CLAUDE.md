@@ -65,12 +65,22 @@ app/
 - **github_service.py** - GitHub App integration for syncing
 - **project_service.py** - Project CRUD and member management
 
+### Git Module (`app/git/`)
+The git module uses **pygit2 with bare repositories** for concurrent access:
+- **bare_repository.py** - Core implementation using pygit2
+  - `BareOntologyRepository` - Direct git object manipulation without working directory
+  - `BareGitRepositoryService` - Service layer with backward-compatible API
+- **repository.py** - Legacy GitPython implementation (deprecated)
+- Bare repos allow multiple users to work on different branches simultaneously
+- All file operations work directly on git blobs/trees, no checkout needed
+
 ### Technology Stack
 - **Database**: PostgreSQL 17 (async via asyncpg + SQLAlchemy 2.0)
 - **Cache/Queue**: Redis 7 (ARQ job queue, pub/sub)
 - **Storage**: MinIO (S3-compatible object storage)
 - **Auth**: Zitadel (OIDC/OAuth2 with JWT validation)
 - **RDF**: RDFLib 7.1+ for graph manipulation
+- **Git**: pygit2 with bare repositories for concurrent version control
 
 ### Key Patterns
 - Async-first: All I/O uses async/await
@@ -93,3 +103,13 @@ From pyproject.toml:
 - Line length: 100 characters
 - Ruff rules: E, W, F, I, B, C4, UP, ARG, SIM
 - MyPy: Strict mode enabled, Python 3.11 target
+
+## Scripts
+
+### Git Repository Migration
+To migrate existing working-directory repositories to bare repositories:
+```bash
+python scripts/migrate_to_bare_repos.py --dry-run  # Preview changes
+python scripts/migrate_to_bare_repos.py            # Execute migration
+python scripts/migrate_to_bare_repos.py --keep-old # Keep old repos after migration
+```
