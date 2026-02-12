@@ -4,12 +4,19 @@
 # This configuration runs ALL services in Docker containers (development mode).
 # For production deployment, see compose.prod.yaml
 #
+# SETUP SCRIPTS:
+#   Fresh start from clean slate:
+#     ./scripts/reset-dev-environment.sh
+#   Configure Zitadel OIDC (after docker compose up):
+#     ./scripts/setup-zitadel.sh --update-env
+#
 # After starting, access:
 #   - Axigraph API: http://localhost:8000
 #   - Zitadel Console: http://localhost:8080/ui/console
 #   - MinIO Console: http://localhost:9001
+#   - Mailpit (email testing): http://localhost:8025
 #
-# Default Zitadel admin: admin@Axigraph.localhost / Admin123!
+# Default Zitadel admin: admin@axigraph.localhost / Admin123!
 
 services:
   # ============================================================================
@@ -81,6 +88,18 @@ services:
       - axigraph
 
   # ============================================================================
+  # Mailpit (local email testing - catches all outgoing emails)
+  # ============================================================================
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: axigraph-mailpit
+    restart: unless-stopped
+    ports:
+      - "8025:8025"  # Web UI
+    networks:
+      - axigraph
+
+  # ============================================================================
   # Zitadel Identity Provider
   # ============================================================================
   zitadel:
@@ -129,6 +148,12 @@ services:
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: Admin123!
 
+      # SMTP configuration (using Mailpit for local development)
+      ZITADEL_DEFAULTINSTANCE_SMTPCONFIGURATION_SMTP_HOST: mailpit:1025
+      ZITADEL_DEFAULTINSTANCE_SMTPCONFIGURATION_SMTP_TLS: "false"
+      ZITADEL_DEFAULTINSTANCE_SMTPCONFIGURATION_FROM: noreply@axigraph.localhost
+      ZITADEL_DEFAULTINSTANCE_SMTPCONFIGURATION_FROMNAME: Axigraph
+
       # Debug logging
       ZITADEL_LOG_LEVEL: debug
       ZITADEL_LOGSTORE_ACCESS_STDOUT_ENABLED: true
@@ -150,6 +175,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      mailpit:
+        condition: service_started
 
   # Login V2 - Next.js based login UI
   login:
