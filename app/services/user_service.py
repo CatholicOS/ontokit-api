@@ -21,7 +21,15 @@ class UserService:
     def __init__(self) -> None:
         self._cache: dict[str, UserInfo] = {}
 
-    async def get_user_info(self, user_id: str, access_token: str) -> UserInfo | None:
+    def _get_service_token(self) -> str | None:
+        """
+        Get the service account token (PAT) from settings.
+
+        This token has management API access for user lookups.
+        """
+        return settings.zitadel_service_token or None
+
+    async def get_user_info(self, user_id: str, access_token: str | None = None) -> UserInfo | None:
         """
         Get user information from Zitadel.
 
@@ -30,7 +38,7 @@ class UserService:
 
         Args:
             user_id: The Zitadel user ID
-            access_token: A valid access token with user read permissions
+            access_token: Unused, kept for backward compatibility
 
         Returns:
             UserInfo dict with id, name, and email, or None if not found
@@ -39,13 +47,18 @@ class UserService:
         if user_id in self._cache:
             return self._cache[user_id]
 
+        # Get service token for management API access
+        service_token = self._get_service_token()
+        if not service_token:
+            return None
+
         # Build the API URL
         base_url = settings.zitadel_internal_url or settings.zitadel_issuer
         url = f"{base_url}/management/v1/users/{user_id}"
 
         # Build headers
         headers = {
-            "Authorization": f"Bearer {access_token}",
+            "Authorization": f"Bearer {service_token}",
             "Content-Type": "application/json",
         }
 
@@ -83,25 +96,21 @@ class UserService:
                     self._cache[user_id] = user_info
                     return user_info
 
-                elif response.status_code == 404:
-                    return None
                 else:
-                    # Log error but don't fail
                     return None
 
         except httpx.HTTPError:
-            # Network error - return None but don't fail
             return None
 
     async def get_users_info(
-        self, user_ids: list[str], access_token: str
+        self, user_ids: list[str], access_token: str | None = None
     ) -> dict[str, UserInfo]:
         """
         Get information for multiple users.
 
         Args:
             user_ids: List of Zitadel user IDs
-            access_token: A valid access token
+            access_token: Unused, kept for backward compatibility
 
         Returns:
             Dict mapping user_id to UserInfo for users that were found
@@ -109,7 +118,7 @@ class UserService:
         result: dict[str, UserInfo] = {}
 
         for user_id in user_ids:
-            user_info = await self.get_user_info(user_id, access_token)
+            user_info = await self.get_user_info(user_id)
             if user_info:
                 result[user_id] = user_info
 

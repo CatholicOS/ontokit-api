@@ -211,6 +211,7 @@ services:
       ZITADEL_INTERNAL_URL: http://zitadel:8080
       ZITADEL_CLIENT_ID: ${ZITADEL_CLIENT_ID:-}
       ZITADEL_CLIENT_SECRET: ${ZITADEL_CLIENT_SECRET:-}
+      ZITADEL_SERVICE_TOKEN: ${ZITADEL_SERVICE_TOKEN:-}
       # CORS
       CORS_ORIGINS: '["http://localhost:3000","http://localhost:5173"]'
       # Git Repository Storage

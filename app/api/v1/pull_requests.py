@@ -70,7 +70,8 @@ async def list_pull_requests(
     - Use author_id filter to show PRs by a specific user
     """
     return await service.list_pull_requests(
-        project_id, user, status_filter, author_id, skip, limit
+        project_id, user, status_filter=status_filter,
+        author_id=author_id, skip=skip, limit=limit
     )
 
 

@@ -52,6 +52,7 @@ from app.schemas.pull_request import (
     ReviewResponse,
 )
 from app.services.github_service import GitHubService, get_github_service
+from app.services.user_service import UserService, get_user_service
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +65,12 @@ class PullRequestService:
         db: AsyncSession,
         git_service: GitRepositoryService | None = None,
         github_service: GitHubService | None = None,
+        user_service: UserService | None = None,
     ) -> None:
         self.db = db
         self.git_service = git_service or get_git_service()
         self.github_service = github_service or get_github_service()
+        self.user_service = user_service or get_user_service()
 
     async def _sync_merge_commits_to_prs(self, project_id: UUID) -> None:
         """Sync merge commits from git history to PR records.
@@ -123,6 +126,12 @@ class PullRequestService:
                 if not pr.head_commit_hash and head_commit_hash:
                     pr.head_commit_hash = head_commit_hash
 
+                # Backfill author name/email if missing
+                if not pr.author_name:
+                    pr.author_name = commit.author_name
+                if not pr.author_email:
+                    pr.author_email = commit.author_email
+
                 prs_updated = True
                 logger.info(
                     f"Backfilled commit hashes for PR #{pr.pr_number} "
@@ -163,6 +172,8 @@ class PullRequestService:
                 source_branch=merged_branch,
                 target_branch="main",  # Assume main as target for direct merges
                 author_id=commit.author_email,  # Use email as author identifier
+                author_name=commit.author_name,
+                author_email=commit.author_email,
                 status=PRStatus.MERGED.value,
                 merged_by=commit.author_email,
                 merged_at=merged_at,
@@ -240,6 +251,8 @@ class PullRequestService:
             source_branch=pr_create.source_branch,
             target_branch=pr_create.target_branch,
             author_id=user.id,
+            author_name=user.name,
+            author_email=user.email,
             status=PRStatus.OPEN.value,
         )
         self.db.add(db_pr)
@@ -1414,9 +1427,7 @@ class PullRequestService:
                 return member.role  # type: ignore[return-value]
         return None
 
-    async def _to_pr_response(
-        self, pr: PullRequest, project_id: UUID
-    ) -> PRResponse:
+    async def _to_pr_response(self, pr: PullRequest, project_id: UUID) -> PRResponse:
         """Convert PullRequest model to response schema."""
         # Count reviews and approvals
         review_count = len(pr.reviews)
@@ -1442,6 +1453,26 @@ class PullRequestService:
             and approval_count >= project.pr_approval_required
         )
 
+        # Look up author info from Zitadel if missing
+        author_name = pr.author_name
+        author_email = pr.author_email
+        if not author_name and pr.author_id:
+            try:
+                user_info = await self.user_service.get_user_info(pr.author_id)
+                if user_info:
+                    author_name = user_info.get("name")
+                    author_email = user_info.get("email")
+                    # Update the database record for future calls
+                    if author_name or author_email:
+                        if author_name:
+                            pr.author_name = author_name
+                        if author_email:
+                            pr.author_email = author_email
+                        await self.db.commit()
+                        logger.info(f"Updated PR #{pr.pr_number} with author info from Zitadel")
+            except Exception as e:
+                logger.warning(f"Failed to look up user info for {pr.author_id}: {e}")
+
         return PRResponse(
             id=pr.id,
             project_id=pr.project_id,
@@ -1452,7 +1483,7 @@ class PullRequestService:
             target_branch=pr.target_branch,
             status=pr.status,  # type: ignore
             author_id=pr.author_id,
-            author=PRUser(id=pr.author_id),
+            author=PRUser(id=pr.author_id, name=author_name, email=author_email),
             github_pr_number=pr.github_pr_number,
             github_pr_url=pr.github_pr_url,
             merged_by=pr.merged_by,

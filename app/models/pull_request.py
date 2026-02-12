@@ -51,6 +51,8 @@ class PullRequest(Base):
 
     # Author (Zitadel user ID)
     author_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    author_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    author_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # GitHub integration (optional)
     github_pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)

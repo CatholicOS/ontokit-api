@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     zitadel_internal_url: str | None = None  # Internal URL for JWKS fetch (defaults to issuer)
     zitadel_client_id: str = ""
     zitadel_client_secret: str = ""
+    zitadel_service_token: str = ""  # PAT for service account (user lookups)
 
     @property
     def zitadel_jwks_base_url(self) -> str:
