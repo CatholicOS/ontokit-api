@@ -468,6 +468,20 @@ class BareOntologyRepository:
 
     # Branch operations
 
+    def get_current_branch(self) -> str:
+        """Get the current branch by reading HEAD."""
+        if self.repo.head_is_unborn:
+            return self.get_default_branch()
+        try:
+            ref = self.repo.references["HEAD"]
+            # HEAD is a symbolic ref pointing to refs/heads/<branch>
+            target = ref.target
+            if isinstance(target, str) and target.startswith("refs/heads/"):
+                return target.replace("refs/heads/", "")
+        except (KeyError, Exception):
+            pass
+        return self.get_default_branch()
+
     def get_default_branch(self) -> str:
         """Get the name of the default branch."""
         for name in ["main", "master"]:
@@ -484,6 +498,7 @@ class BareOntologyRepository:
     def list_branches(self) -> list[BranchInfo]:
         """List all branches with their metadata."""
         branches = []
+        current_branch = self.get_current_branch()
         default_branch = self.get_default_branch()
 
         for ref_name in self.repo.references:
@@ -512,7 +527,7 @@ class BareOntologyRepository:
             branches.append(
                 BranchInfo(
                     name=branch_name,
-                    is_current=False,  # Bare repos don't have "current" branch
+                    is_current=branch_name == current_branch,
                     is_default=branch_name == default_branch,
                     commit_hash=str(commit.id),
                     commit_message=commit.message.strip().split("\n")[0],
@@ -773,8 +788,6 @@ class BareGitRepositoryService:
             base_path: Base path for storing repositories. Defaults to settings.
         """
         self.base_path = Path(base_path or settings.git_repos_base_path)
-        # Track "active" branch per project (in-memory, for session compatibility)
-        self._active_branches: dict[UUID, str] = {}
 
     def _get_project_repo_path(self, project_id: UUID) -> Path:
         """Get the repository path for a project."""
@@ -974,21 +987,14 @@ class BareGitRepositoryService:
 
     def get_current_branch(self, project_id: UUID) -> str:
         """
-        Get the "current" branch for a project.
-
-        Note: Bare repositories don't have a true current branch concept.
-        This returns the tracked active branch or default branch for compatibility.
+        Get the current branch for a project by reading HEAD.
         """
-        if project_id in self._active_branches:
-            return self._active_branches[project_id]
-        return self.get_default_branch(project_id)
+        repo = self.get_repository(project_id)
+        return repo.get_current_branch()
 
     def switch_branch(self, project_id: UUID, name: str) -> BranchInfo:
         """
-        Set the active branch for a project.
-
-        Note: Bare repositories don't actually checkout. This just tracks
-        which branch should be used for operations that don't specify a branch.
+        Set the active branch for a project by updating HEAD.
 
         Args:
             project_id: The project's UUID
@@ -1004,8 +1010,8 @@ class BareGitRepositoryService:
         if branch_ref not in repo.repo.references:
             raise KeyError(f"Branch not found: {name}")
 
-        # Track as active branch
-        self._active_branches[project_id] = name
+        # Update HEAD to point to the new branch
+        repo.repo.set_head(branch_ref)
 
         # Return branch info
         branches = repo.list_branches()
@@ -1013,7 +1019,7 @@ class BareGitRepositoryService:
             if b.name == name:
                 return BranchInfo(
                     name=b.name,
-                    is_current=True,  # Mark as current since we just "switched" to it
+                    is_current=True,
                     is_default=b.is_default,
                     commit_hash=b.commit_hash,
                     commit_message=b.commit_message,
