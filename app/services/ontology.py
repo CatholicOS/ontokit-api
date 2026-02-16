@@ -183,7 +183,7 @@ class OntologyService:
 
     def __init__(self, storage: StorageService | None = None) -> None:
         self._storage = storage
-        self._graphs: dict[UUID, Graph] = {}
+        self._graphs: dict[tuple[UUID, str], Graph] = {}
 
     async def create(self, ontology: OntologyCreate) -> OntologyResponse:
         """Create a new ontology."""
@@ -210,9 +210,11 @@ class OntologyService:
         # TODO: Implement with database delete
         raise NotImplementedError("Database integration pending")
 
-    async def serialize(self, ontology_id: UUID, format: str = "turtle") -> str:
+    async def serialize(
+        self, ontology_id: UUID, format: str = "turtle", branch: str = "main"
+    ) -> str:
         """Serialize ontology to string in specified format."""
-        graph = await self._get_graph(ontology_id)
+        graph = await self._get_graph(ontology_id, branch)
         return graph.serialize(format=format)
 
     async def import_from_file(
@@ -256,9 +258,10 @@ class OntologyService:
         ontology_id: UUID,
         parent_iri: str | None = None,
         include_imported: bool = False,
+        branch: str = "main",
     ) -> OWLClassListResponse:
         """List classes in an ontology."""
-        graph = await self._get_graph(ontology_id)
+        graph = await self._get_graph(ontology_id, branch)
         classes = []
 
         for s in graph.subjects(RDF.type, OWL.Class):
@@ -297,9 +300,10 @@ class OntologyService:
         ontology_id: UUID,
         class_iri: str,
         label_preferences: list[str] | None = None,
+        branch: str = "main",
     ) -> OWLClassResponse | None:
         """Get a class by IRI."""
-        graph = await self._get_graph(ontology_id)
+        graph = await self._get_graph(ontology_id, branch)
         class_uri = URIRef(class_iri)
 
         if (class_uri, RDF.type, OWL.Class) not in graph:
@@ -334,13 +338,14 @@ class OntologyService:
         self,
         project_id: UUID,
         label_preferences: list[str] | None = None,
+        branch: str = "main",
     ) -> list[OWLClassResponse]:
         """
         Get all root classes (classes with no parent or only owl:Thing as parent).
 
         These are the top-level classes in the ontology hierarchy.
         """
-        graph = await self._get_graph(project_id)
+        graph = await self._get_graph(project_id, branch)
         root_classes = []
 
         owl_thing = OWL.Thing
@@ -384,11 +389,12 @@ class OntologyService:
         project_id: UUID,
         class_iri: str,
         label_preferences: list[str] | None = None,
+        branch: str = "main",
     ) -> list[OWLClassResponse]:
         """
         Get direct children of a class (classes that have this class as a direct parent).
         """
-        graph = await self._get_graph(project_id)
+        graph = await self._get_graph(project_id, branch)
         parent_uri = URIRef(class_iri)
         children = []
 
@@ -408,9 +414,9 @@ class OntologyService:
         children.sort(key=sort_key)
         return children
 
-    async def get_class_count(self, project_id: UUID) -> int:
+    async def get_class_count(self, project_id: UUID, branch: str = "main") -> int:
         """Get total number of classes in the ontology."""
-        graph = await self._get_graph(project_id)
+        graph = await self._get_graph(project_id, branch)
         return sum(
             1 for s in graph.subjects(RDF.type, OWL.Class)
             if isinstance(s, URIRef) and s != OWL.Thing
@@ -421,6 +427,7 @@ class OntologyService:
         project_id: UUID,
         class_iri: str,
         label_preferences: list[str] | None = None,
+        branch: str = "main",
     ) -> list[OWLClassTreeNode]:
         """
         Get the path from root to a specific class.
@@ -431,7 +438,7 @@ class OntologyService:
 
         Returns an empty list if the class is a root class or not found.
         """
-        graph = await self._get_graph(project_id)
+        graph = await self._get_graph(project_id, branch)
         target_uri = URIRef(class_iri)
         owl_thing = OWL.Thing
 
@@ -481,9 +488,10 @@ class OntologyService:
         self,
         project_id: UUID,
         label_preferences: list[str] | None = None,
+        branch: str = "main",
     ) -> list[OWLClassTreeNode]:
         """Get root classes as tree nodes (optimized for tree view)."""
-        root_classes = await self.get_root_classes(project_id, label_preferences)
+        root_classes = await self.get_root_classes(project_id, label_preferences, branch)
         return [self._class_to_tree_node(cls, label_preferences) for cls in root_classes]
 
     async def get_children_tree_nodes(
@@ -491,9 +499,12 @@ class OntologyService:
         project_id: UUID,
         class_iri: str,
         label_preferences: list[str] | None = None,
+        branch: str = "main",
     ) -> list[OWLClassTreeNode]:
         """Get children of a class as tree nodes (optimized for tree view)."""
-        children = await self.get_class_children(project_id, class_iri, label_preferences)
+        children = await self.get_class_children(
+            project_id, class_iri, label_preferences, branch
+        )
         return [self._class_to_tree_node(cls, label_preferences) for cls in children]
 
     def _class_to_tree_node(
@@ -560,13 +571,16 @@ class OntologyService:
 
     # Helper methods
 
-    async def load_from_storage(self, project_id: UUID, source_file_path: str) -> Graph:
+    async def load_from_storage(
+        self, project_id: UUID, source_file_path: str, branch: str = "main"
+    ) -> Graph:
         """
         Load an ontology from MinIO storage.
 
         Args:
             project_id: The project UUID (used for caching)
             source_file_path: The full path in MinIO (e.g., "axigraph/projects/{id}/ontology.owl")
+            branch: The branch name (used for cache key)
 
         Returns:
             The parsed RDF graph
@@ -597,26 +611,71 @@ class OntologyService:
         graph = Graph()
         graph.parse(data=content.decode("utf-8"), format=rdf_format)
 
-        # Cache the graph
-        self._graphs[project_id] = graph
+        # Cache the graph with branch key
+        self._graphs[(project_id, branch)] = graph
         return graph
 
-    async def _get_graph(self, ontology_id: UUID) -> Graph:
-        """Get the cached RDF graph for a project."""
-        if ontology_id not in self._graphs:
+    async def load_from_git(
+        self,
+        project_id: UUID,
+        branch: str,
+        filename: str,
+        git_service: Any,
+    ) -> Graph:
+        """
+        Load an ontology from a git branch.
+
+        Args:
+            project_id: The project UUID
+            branch: The branch name to read from
+            filename: The ontology filename (e.g., "ontology.ttl")
+            git_service: GitRepositoryService instance
+
+        Returns:
+            The parsed RDF graph
+        """
+        # Determine format from file extension
+        ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        rdf_format = FORMAT_MAP.get(ext)
+        if not rdf_format:
+            raise ValueError(f"Unsupported file format: {ext}")
+
+        # Read file content from git branch
+        content = git_service.get_file_from_branch(project_id, branch, filename)
+
+        graph = Graph()
+        graph.parse(data=content.decode("utf-8"), format=rdf_format)
+
+        # Cache with branch key
+        self._graphs[(project_id, branch)] = graph
+        return graph
+
+    async def _get_graph(self, ontology_id: UUID, branch: str = "main") -> Graph:
+        """Get the cached RDF graph for a project and branch."""
+        key = (ontology_id, branch)
+        if key not in self._graphs:
             raise ValueError(
-                f"Graph for project {ontology_id} not loaded. "
-                "Call load_from_storage first."
+                f"Graph for project {ontology_id} branch {branch} not loaded. "
+                "Call load_from_storage or load_from_git first."
             )
-        return self._graphs[ontology_id]
+        return self._graphs[key]
 
-    def is_loaded(self, project_id: UUID) -> bool:
-        """Check if a project's ontology graph is loaded in memory."""
-        return project_id in self._graphs
+    def is_loaded(self, project_id: UUID, branch: str = "main") -> bool:
+        """Check if a project's ontology graph is loaded in memory for a given branch."""
+        return (project_id, branch) in self._graphs
 
-    def unload(self, project_id: UUID) -> None:
-        """Remove a project's ontology graph from memory."""
-        self._graphs.pop(project_id, None)
+    def unload(self, project_id: UUID, branch: str | None = None) -> None:
+        """Remove a project's ontology graph from memory.
+
+        If branch is None, remove all cached graphs for the project.
+        Otherwise, remove only the specified branch's graph.
+        """
+        if branch is None:
+            keys_to_remove = [k for k in self._graphs if k[0] == project_id]
+            for k in keys_to_remove:
+                del self._graphs[k]
+        else:
+            self._graphs.pop((project_id, branch), None)
 
     async def _class_to_response(
         self,

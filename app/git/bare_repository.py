@@ -994,14 +994,18 @@ class BareGitRepositoryService:
 
     def switch_branch(self, project_id: UUID, name: str) -> BranchInfo:
         """
-        Set the active branch for a project by updating HEAD.
+        Validate that a branch exists and return its info.
+
+        Note: This no longer mutates HEAD. Branch tracking is now
+        handled client-side, with the branch name passed explicitly
+        in API calls.
 
         Args:
             project_id: The project's UUID
-            name: Name of the branch to activate
+            name: Name of the branch to validate
 
         Returns:
-            BranchInfo for the activated branch
+            BranchInfo for the requested branch
         """
         repo = self.get_repository(project_id)
 
@@ -1010,16 +1014,13 @@ class BareGitRepositoryService:
         if branch_ref not in repo.repo.references:
             raise KeyError(f"Branch not found: {name}")
 
-        # Update HEAD to point to the new branch
-        repo.repo.set_head(branch_ref)
-
-        # Return branch info
+        # Return branch info without mutating HEAD
         branches = repo.list_branches()
         for b in branches:
             if b.name == name:
                 return BranchInfo(
                     name=b.name,
-                    is_current=True,
+                    is_current=b.is_current,
                     is_default=b.is_default,
                     commit_hash=b.commit_hash,
                     commit_message=b.commit_message,
