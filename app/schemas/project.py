@@ -243,6 +243,7 @@ class BranchListResponse(BaseModel):
     items: list[BranchInfo]
     current_branch: str
     default_branch: str
+    preferred_branch: str | None = None
 
 
 # Source Content Schemas

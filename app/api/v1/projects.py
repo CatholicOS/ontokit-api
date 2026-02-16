@@ -68,7 +68,9 @@ async def list_projects(
     user: OptionalUser,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
-    filter: str | None = Query(default=None, description="Filter: 'public', 'mine', or null for all accessible"),
+    filter: str | None = Query(
+        default=None, description="Filter: 'public', 'mine', or null for all accessible"
+    ),
 ) -> ProjectListResponse:
     """
     List projects accessible to the current user.
@@ -155,14 +157,18 @@ async def update_project(
     project_id: UUID,
     project: ProjectUpdate,
     service: Annotated[ProjectService, Depends(get_service)],
+    storage: Annotated[StorageService, Depends(get_storage)],
     user: RequiredUser,
 ) -> ProjectResponse:
     """
     Update project settings.
 
     Only the owner or admin can update project settings.
+
+    When name or description is updated, the corresponding metadata properties
+    in the ontology RDF source are also updated and committed to git.
     """
-    return await service.update(project_id, project, user)
+    return await service.update(project_id, project, user, storage=storage)
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -261,9 +267,11 @@ async def _ensure_ontology_loaded(
     service: ProjectService,
     ontology: OntologyService,
     user: OptionalUser,
+    branch: str = "main",
+    git: GitRepositoryService | None = None,
 ) -> ProjectResponse:
     """
-    Helper to ensure the ontology graph is loaded from storage.
+    Helper to ensure the ontology graph is loaded for a given branch.
 
     Returns the project response so callers can access label_preferences.
     """
@@ -276,20 +284,35 @@ async def _ensure_ontology_loaded(
             detail="Project does not have an ontology file",
         )
 
-    # Load if not already loaded
-    if not ontology.is_loaded(project_id):
-        try:
-            await ontology.load_from_storage(project_id, project.source_file_path)
-        except StorageError as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Failed to load ontology from storage: {e}",
-            )
-        except ValueError as e:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=str(e),
-            )
+    # Load if not already loaded for this branch
+    if not ontology.is_loaded(project_id, branch):
+        import os
+
+        filename = os.path.basename(project.source_file_path)
+
+        # Prefer loading from git if available
+        if git is not None and git.repository_exists(project_id):
+            try:
+                await ontology.load_from_git(project_id, branch, filename, git)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Failed to load ontology from git branch '{branch}': {e}",
+                ) from e
+        else:
+            # Fall back to storage (e.g., for default branch when no git service)
+            try:
+                await ontology.load_from_storage(project_id, project.source_file_path, branch)
+            except StorageError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Failed to load ontology from storage: {e}",
+                ) from e
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=str(e),
+                ) from e
 
     return project
 
@@ -299,7 +322,9 @@ async def get_ontology_tree_root(
     project_id: UUID,
     service: Annotated[ProjectService, Depends(get_service)],
     ontology: Annotated[OntologyService, Depends(get_ontology)],
+    git: Annotated[GitRepositoryService, Depends(get_git)],
     user: OptionalUser,
+    branch: str | None = Query(default=None, description="Branch to read from"),
 ) -> OWLClassTreeResponse:
     """
     Get the root classes of the ontology tree.
@@ -307,31 +332,45 @@ async def get_ontology_tree_root(
     Returns the top-level classes (classes with no parent or only owl:Thing as parent)
     as tree nodes optimized for tree view rendering.
     """
-    project = await _ensure_ontology_loaded(project_id, service, ontology, user)
+    resolved_branch = branch or git.get_default_branch(project_id)
+    project = await _ensure_ontology_loaded(
+        project_id, service, ontology, user, resolved_branch, git
+    )
 
-    nodes = await ontology.get_root_tree_nodes(project_id, project.label_preferences)
-    total_classes = await ontology.get_class_count(project_id)
+    nodes = await ontology.get_root_tree_nodes(
+        project_id, project.label_preferences, resolved_branch
+    )
+    total_classes = await ontology.get_class_count(project_id, resolved_branch)
 
     return OWLClassTreeResponse(nodes=nodes, total_classes=total_classes)
 
 
-@router.get("/{project_id}/ontology/tree/{class_iri:path}/children", response_model=OWLClassTreeResponse)
+@router.get(
+    "/{project_id}/ontology/tree/{class_iri:path}/children", response_model=OWLClassTreeResponse
+)
 async def get_ontology_tree_children(
     project_id: UUID,
     class_iri: str,
     service: Annotated[ProjectService, Depends(get_service)],
     ontology: Annotated[OntologyService, Depends(get_ontology)],
+    git: Annotated[GitRepositoryService, Depends(get_git)],
     user: OptionalUser,
+    branch: str | None = Query(default=None, description="Branch to read from"),
 ) -> OWLClassTreeResponse:
     """
     Get the children of a specific class.
 
     Returns direct subclasses as tree nodes for lazy-loading tree expansion.
     """
-    project = await _ensure_ontology_loaded(project_id, service, ontology, user)
+    resolved_branch = branch or git.get_default_branch(project_id)
+    project = await _ensure_ontology_loaded(
+        project_id, service, ontology, user, resolved_branch, git
+    )
 
-    nodes = await ontology.get_children_tree_nodes(project_id, class_iri, project.label_preferences)
-    total_classes = await ontology.get_class_count(project_id)
+    nodes = await ontology.get_children_tree_nodes(
+        project_id, class_iri, project.label_preferences, resolved_branch
+    )
+    total_classes = await ontology.get_class_count(project_id, resolved_branch)
 
     return OWLClassTreeResponse(nodes=nodes, total_classes=total_classes)
 
@@ -342,16 +381,23 @@ async def get_ontology_class(
     class_iri: str,
     service: Annotated[ProjectService, Depends(get_service)],
     ontology: Annotated[OntologyService, Depends(get_ontology)],
+    git: Annotated[GitRepositoryService, Depends(get_git)],
     user: OptionalUser,
+    branch: str | None = Query(default=None, description="Branch to read from"),
 ) -> OWLClassResponse:
     """
     Get details of a specific class.
 
     Returns full class information including labels, comments, parents, etc.
     """
-    project = await _ensure_ontology_loaded(project_id, service, ontology, user)
+    resolved_branch = branch or git.get_default_branch(project_id)
+    project = await _ensure_ontology_loaded(
+        project_id, service, ontology, user, resolved_branch, git
+    )
 
-    result = await ontology.get_class(project_id, class_iri, project.label_preferences)
+    result = await ontology.get_class(
+        project_id, class_iri, project.label_preferences, resolved_branch
+    )
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -360,13 +406,17 @@ async def get_ontology_class(
     return result
 
 
-@router.get("/{project_id}/ontology/tree/{class_iri:path}/ancestors", response_model=OWLClassTreeResponse)
+@router.get(
+    "/{project_id}/ontology/tree/{class_iri:path}/ancestors", response_model=OWLClassTreeResponse
+)
 async def get_ontology_class_ancestors(
     project_id: UUID,
     class_iri: str,
     service: Annotated[ProjectService, Depends(get_service)],
     ontology: Annotated[OntologyService, Depends(get_ontology)],
+    git: Annotated[GitRepositoryService, Depends(get_git)],
     user: OptionalUser,
+    branch: str | None = Query(default=None, description="Branch to read from"),
 ) -> OWLClassTreeResponse:
     """
     Get the ancestor path from root to a specific class.
@@ -375,10 +425,15 @@ async def get_ontology_class_ancestors(
     down to (but not including) the target class. This is useful for
     expanding the tree view to reveal a specific class.
     """
-    project = await _ensure_ontology_loaded(project_id, service, ontology, user)
+    resolved_branch = branch or git.get_default_branch(project_id)
+    project = await _ensure_ontology_loaded(
+        project_id, service, ontology, user, resolved_branch, git
+    )
 
-    nodes = await ontology.get_ancestor_path(project_id, class_iri, project.label_preferences)
-    total_classes = await ontology.get_class_count(project_id)
+    nodes = await ontology.get_ancestor_path(
+        project_id, class_iri, project.label_preferences, resolved_branch
+    )
+    total_classes = await ontology.get_class_count(project_id, resolved_branch)
 
     return OWLClassTreeResponse(nodes=nodes, total_classes=total_classes)
 
@@ -462,6 +517,7 @@ async def get_file_at_revision(
     if project.source_file_path and filename == "ontology.ttl":
         # Extract the actual filename
         import os
+
         actual_filename = os.path.basename(project.source_file_path)
         # Use the stored filename pattern (e.g., ontology.ttl)
         if actual_filename.startswith("ontology."):
@@ -548,9 +604,14 @@ async def list_branches(
     List all branches for a project.
 
     Returns a list of branches with their metadata including commits ahead/behind.
+    Includes the user's preferred branch if authenticated.
     """
     # Check project access
     await service.get(project_id, user)
+
+    preferred = None
+    if user:
+        preferred = await service.get_branch_preference(project_id, user.id)
 
     # Check if repository exists
     if not git.repository_exists(project_id):
@@ -558,6 +619,7 @@ async def list_branches(
             items=[],
             current_branch="main",
             default_branch="main",
+            preferred_branch=preferred,
         )
 
     branches = git.list_branches(project_id)
@@ -576,12 +638,29 @@ async def list_branches(
             )
             for b in branches
         ],
-        current_branch=git.get_current_branch(project_id),
+        current_branch=git.get_default_branch(project_id),
         default_branch=git.get_default_branch(project_id),
+        preferred_branch=preferred,
     )
 
 
-@router.post("/{project_id}/branches", response_model=BranchInfo, status_code=status.HTTP_201_CREATED)
+@router.put(
+    "/{project_id}/branch-preference",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def save_branch_preference(
+    project_id: UUID,
+    service: Annotated[ProjectService, Depends(get_service)],
+    user: RequiredUser,
+    branch: str = Query(..., description="Branch name to save as preference"),
+) -> None:
+    """Save the user's preferred branch for a project."""
+    await service.set_branch_preference(project_id, user.id, branch)
+
+
+@router.post(
+    "/{project_id}/branches", response_model=BranchInfo, status_code=status.HTTP_201_CREATED
+)
 async def create_branch(
     project_id: UUID,
     branch: BranchCreate,
@@ -694,7 +773,9 @@ async def delete_branch(
     service: Annotated[ProjectService, Depends(get_service)],
     git: Annotated[GitRepositoryService, Depends(get_git)],
     user: RequiredUser,
-    force: bool = Query(default=False, description="Force delete even if branch has unmerged changes"),
+    force: bool = Query(
+        default=False, description="Force delete even if branch has unmerged changes"
+    ),
 ) -> None:
     """
     Delete a branch.
@@ -745,6 +826,7 @@ async def save_source_content(
     ontology: Annotated[OntologyService, Depends(get_ontology)],
     git: Annotated[GitRepositoryService, Depends(get_git)],
     user: RequiredUser,
+    branch: str | None = Query(default=None, description="Branch to commit to"),
 ) -> SourceContentSaveResponse:
     """
     Save ontology source content to storage and create a git commit.
@@ -770,6 +852,7 @@ async def save_source_content(
     # Validate the content is valid Turtle
     try:
         from rdflib import Graph
+
         g = Graph()
         g.parse(data=data.content, format="turtle")
     except Exception as e:
@@ -785,11 +868,12 @@ async def save_source_content(
             detail="No repository found for this project",
         )
 
-    # Get current branch
-    current_branch = git.get_current_branch(project_id)
+    # Resolve branch from query param or default
+    current_branch = branch or git.get_default_branch(project_id)
 
     # Extract filename from source_file_path
     import os
+
     filename = os.path.basename(project.source_file_path)
 
     # Convert content to bytes
@@ -797,18 +881,14 @@ async def save_source_content(
 
     # Save to storage
     try:
-        await storage.upload_file(
-            project.source_file_path,
-            content_bytes,
-            "text/turtle"
-        )
+        await storage.upload_file(project.source_file_path, content_bytes, "text/turtle")
     except StorageError as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Failed to save to storage: {e}",
         )
 
-    # Commit to git
+    # Commit to git on the specified branch
     try:
         commit_info = git.commit_changes(
             project_id=project_id,
@@ -817,6 +897,7 @@ async def save_source_content(
             message=data.commit_message,
             author_name=user.name,
             author_email=user.email,
+            branch_name=current_branch,
         )
     except Exception as e:
         raise HTTPException(
@@ -826,11 +907,12 @@ async def save_source_content(
 
     # Reload the ontology in memory to reflect changes
     try:
-        ontology.unload(project_id)
-        await ontology.load_from_storage(project_id, project.source_file_path)
+        ontology.unload(project_id, current_branch)
+        await ontology.load_from_git(project_id, current_branch, filename, git)
     except Exception as e:
         # Log but don't fail - the commit succeeded
         import logging
+
         logging.warning(f"Failed to reload ontology after save: {e}")
 
     return SourceContentSaveResponse(

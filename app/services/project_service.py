@@ -42,9 +42,7 @@ logger = logging.getLogger(__name__)
 class ProjectService:
     """Service for project CRUD operations and member management."""
 
-    def __init__(
-        self, db: AsyncSession, git_service: GitRepositoryService | None = None
-    ) -> None:
+    def __init__(self, db: AsyncSession, git_service: GitRepositoryService | None = None) -> None:
         self.db = db
         self.git_service = git_service or get_git_service()
 
@@ -117,12 +115,13 @@ class ProjectService:
                 detail=str(e),
             ) from e
 
-        # Normalize to Turtle format for canonical representation
-        # This ensures consistent formatting and minimal diffs on subsequent edits
+        # Normalize to Turtle format for consistent representation
+        # Skip canonical bnode IDs on import for speed - can be applied later via
+        # the normalization feature if desired
         normalization_report_json: str | None = None
         try:
             normalized_content, normalization_report = extractor.normalize_to_turtle(
-                file_content, filename
+                file_content, filename, use_canonical=False
             )
             normalization_report_json = json.dumps(normalization_report.to_dict())
         except (UnsupportedFormatError, OntologyParseError) as e:
@@ -198,9 +197,7 @@ class ProjectService:
             logger.info(f"Initialized git repository for project {db_project.id}")
         except Exception as e:
             # Log the error but don't fail the import - git is supplementary
-            logger.warning(
-                f"Failed to initialize git repository for project {db_project.id}: {e}"
-            )
+            logger.warning(f"Failed to initialize git repository for project {db_project.id}: {e}")
 
         return self._to_import_response(db_project, owner, file_path)
 
@@ -232,15 +229,11 @@ class ProjectService:
                 query = query.where(Project.is_public == True)  # noqa: E712
             elif filter_type == "mine":
                 # Projects where user is a member
-                subquery = select(ProjectMember.project_id).where(
-                    ProjectMember.user_id == user.id
-                )
+                subquery = select(ProjectMember.project_id).where(ProjectMember.user_id == user.id)
                 query = query.where(Project.id.in_(subquery))
             else:
                 # All accessible: public OR user is a member
-                subquery = select(ProjectMember.project_id).where(
-                    ProjectMember.user_id == user.id
-                )
+                subquery = select(ProjectMember.project_id).where(ProjectMember.user_id == user.id)
                 query = query.where(
                     or_(
                         Project.is_public == True,  # noqa: E712
@@ -303,9 +296,7 @@ class ProjectService:
             )
 
         # Track if name or description changed for RDF sync
-        name_changed = (
-            project_update.name is not None and project_update.name != project.name
-        )
+        name_changed = project_update.name is not None and project_update.name != project.name
         description_changed = (
             project_update.description is not None
             and project_update.description != project.description
@@ -457,6 +448,31 @@ class ProjectService:
         except Exception as e:
             logger.warning(f"Failed to delete git repository for project {project_id}: {e}")
 
+    # Branch preference
+
+    async def get_branch_preference(self, project_id: UUID, user_id: str) -> str | None:
+        """Get user's preferred branch for a project."""
+        result = await self.db.execute(
+            select(ProjectMember.preferred_branch).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def set_branch_preference(self, project_id: UUID, user_id: str, branch: str) -> None:
+        """Save user's preferred branch for a project."""
+        result = await self.db.execute(
+            select(ProjectMember).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == user_id,
+            )
+        )
+        member = result.scalar_one_or_none()
+        if member:
+            member.preferred_branch = branch
+            await self.db.commit()
+
     # Member management
 
     async def list_members(
@@ -497,10 +513,7 @@ class ProjectService:
                         email=info["email"],
                     )
 
-        items = [
-            self._member_to_response(m, user_info_map.get(m.user_id))
-            for m in project.members
-        ]
+        items = [self._member_to_response(m, user_info_map.get(m.user_id)) for m in project.members]
 
         return MemberListResponse(items=items, total=len(items))
 
@@ -608,9 +621,7 @@ class ProjectService:
 
         return self._member_to_response(db_member)
 
-    async def remove_member(
-        self, project_id: UUID, member_user_id: str, user: CurrentUser
-    ) -> None:
+    async def remove_member(self, project_id: UUID, member_user_id: str, user: CurrentUser) -> None:
         """Remove a member from a project."""
         project = await self._get_project(project_id)
         user_role = self._get_user_role(project, user)
@@ -661,9 +672,7 @@ class ProjectService:
     async def _get_project(self, project_id: UUID) -> Project:
         """Get a project by ID or raise 404."""
         result = await self.db.execute(
-            select(Project)
-            .options(selectinload(Project.members))
-            .where(Project.id == project_id)
+            select(Project).options(selectinload(Project.members)).where(Project.id == project_id)
         )
         project = result.scalar_one_or_none()
 
@@ -693,9 +702,7 @@ class ProjectService:
                 return member.role  # type: ignore[return-value]
         return None
 
-    def _to_response(
-        self, project: Project, user: CurrentUser | None
-    ) -> ProjectResponse:
+    def _to_response(self, project: Project, user: CurrentUser | None) -> ProjectResponse:
         """Convert Project model to response schema."""
         user_role = None
         if user:
