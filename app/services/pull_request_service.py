@@ -53,6 +53,8 @@ from app.schemas.pull_request import (
     ReviewListResponse,
     ReviewResponse,
 )
+from app.core.encryption import decrypt_token
+from app.models.user_github_token import UserGitHubToken
 from app.services.github_service import GitHubService, get_github_service
 from app.services.user_service import UserService, get_user_service
 
@@ -260,12 +262,13 @@ class PullRequestService:
         self.db.add(db_pr)
         await self.db.flush()
 
-        # Sync with GitHub if integration exists
-        github_integration = await self._get_github_integration(project_id)
-        if github_integration and github_integration.sync_enabled:
+        # Sync with GitHub if integration exists and we can resolve a token
+        gh_result = await self._get_github_token(project_id)
+        if gh_result:
+            github_integration, token = gh_result
             try:
                 gh_pr = await self.github_service.create_pull_request(
-                    installation_id=github_integration.installation_id,
+                    token=token,
                     owner=github_integration.repo_owner,
                     repo=github_integration.repo_name,
                     title=pr_create.title,
@@ -375,19 +378,21 @@ class PullRequestService:
             pr.description = pr_update.description
 
         # Sync with GitHub if integration exists
-        github_integration = await self._get_github_integration(project_id)
-        if github_integration and github_integration.sync_enabled and pr.github_pr_number:
-            try:
-                await self.github_service.update_pull_request(
-                    installation_id=github_integration.installation_id,
-                    owner=github_integration.repo_owner,
-                    repo=github_integration.repo_name,
-                    pr_number=pr.github_pr_number,
-                    title=pr_update.title,
-                    body=pr_update.description,
-                )
-            except Exception as e:
-                logger.warning(f"Failed to update GitHub PR: {e}")
+        if pr.github_pr_number:
+            gh_result = await self._get_github_token(project_id)
+            if gh_result:
+                github_integration, token = gh_result
+                try:
+                    await self.github_service.update_pull_request(
+                        token=token,
+                        owner=github_integration.repo_owner,
+                        repo=github_integration.repo_name,
+                        pr_number=pr.github_pr_number,
+                        title=pr_update.title,
+                        body=pr_update.description,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to update GitHub PR: {e}")
 
         await self.db.commit()
         await self.db.refresh(pr)
@@ -418,17 +423,19 @@ class PullRequestService:
         pr.status = PRStatus.CLOSED.value
 
         # Sync with GitHub if integration exists
-        github_integration = await self._get_github_integration(project_id)
-        if github_integration and github_integration.sync_enabled and pr.github_pr_number:
-            try:
-                await self.github_service.close_pull_request(
-                    installation_id=github_integration.installation_id,
-                    owner=github_integration.repo_owner,
-                    repo=github_integration.repo_name,
-                    pr_number=pr.github_pr_number,
-                )
-            except Exception as e:
-                logger.warning(f"Failed to close GitHub PR: {e}")
+        if pr.github_pr_number:
+            gh_result = await self._get_github_token(project_id)
+            if gh_result:
+                github_integration, token = gh_result
+                try:
+                    await self.github_service.close_pull_request(
+                        token=token,
+                        owner=github_integration.repo_owner,
+                        repo=github_integration.repo_name,
+                        pr_number=pr.github_pr_number,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to close GitHub PR: {e}")
 
         await self.db.commit()
         await self.db.refresh(pr)
@@ -459,17 +466,19 @@ class PullRequestService:
         pr.status = PRStatus.OPEN.value
 
         # Sync with GitHub if integration exists
-        github_integration = await self._get_github_integration(project_id)
-        if github_integration and github_integration.sync_enabled and pr.github_pr_number:
-            try:
-                await self.github_service.reopen_pull_request(
-                    installation_id=github_integration.installation_id,
-                    owner=github_integration.repo_owner,
-                    repo=github_integration.repo_name,
-                    pr_number=pr.github_pr_number,
-                )
-            except Exception as e:
-                logger.warning(f"Failed to reopen GitHub PR: {e}")
+        if pr.github_pr_number:
+            gh_result = await self._get_github_token(project_id)
+            if gh_result:
+                github_integration, token = gh_result
+                try:
+                    await self.github_service.reopen_pull_request(
+                        token=token,
+                        owner=github_integration.repo_owner,
+                        repo=github_integration.repo_name,
+                        pr_number=pr.github_pr_number,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to reopen GitHub PR: {e}")
 
         await self.db.commit()
         await self.db.refresh(pr)
@@ -562,18 +571,20 @@ class PullRequestService:
                 logger.warning(f"Failed to delete source branch: {e}")
 
         # Sync with GitHub if integration exists
-        github_integration = await self._get_github_integration(project_id)
-        if github_integration and github_integration.sync_enabled and pr.github_pr_number:
-            try:
-                await self.github_service.merge_pull_request(
-                    installation_id=github_integration.installation_id,
-                    owner=github_integration.repo_owner,
-                    repo=github_integration.repo_name,
-                    pr_number=pr.github_pr_number,
-                    commit_title=merge_message,
-                )
-            except Exception as e:
-                logger.warning(f"Failed to merge GitHub PR: {e}")
+        if pr.github_pr_number:
+            gh_result = await self._get_github_token(project_id)
+            if gh_result:
+                github_integration, token = gh_result
+                try:
+                    await self.github_service.merge_pull_request(
+                        token=token,
+                        owner=github_integration.repo_owner,
+                        repo=github_integration.repo_name,
+                        pr_number=pr.github_pr_number,
+                        commit_title=merge_message,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to merge GitHub PR: {e}")
 
         await self.db.commit()
 
@@ -618,26 +629,28 @@ class PullRequestService:
         self.db.add(db_review)
 
         # Sync with GitHub if integration exists
-        github_integration = await self._get_github_integration(project_id)
-        if github_integration and github_integration.sync_enabled and pr.github_pr_number:
-            try:
-                # Map status to GitHub event
-                event_map = {
-                    "approved": "APPROVE",
-                    "changes_requested": "REQUEST_CHANGES",
-                    "commented": "COMMENT",
-                }
-                gh_review = await self.github_service.create_review(
-                    installation_id=github_integration.installation_id,
-                    owner=github_integration.repo_owner,
-                    repo=github_integration.repo_name,
-                    pr_number=pr.github_pr_number,
-                    event=event_map.get(review_create.status, "COMMENT"),
-                    body=review_create.body,
-                )
-                db_review.github_review_id = gh_review.id
-            except Exception as e:
-                logger.warning(f"Failed to create GitHub review: {e}")
+        if pr.github_pr_number:
+            gh_result = await self._get_github_token(project_id)
+            if gh_result:
+                github_integration, token = gh_result
+                try:
+                    # Map status to GitHub event
+                    event_map = {
+                        "approved": "APPROVE",
+                        "changes_requested": "REQUEST_CHANGES",
+                        "commented": "COMMENT",
+                    }
+                    gh_review = await self.github_service.create_review(
+                        token=token,
+                        owner=github_integration.repo_owner,
+                        repo=github_integration.repo_name,
+                        pr_number=pr.github_pr_number,
+                        event=event_map.get(review_create.status, "COMMENT"),
+                        body=review_create.body,
+                    )
+                    db_review.github_review_id = gh_review.id
+                except Exception as e:
+                    logger.warning(f"Failed to create GitHub review: {e}")
 
         await self.db.commit()
         await self.db.refresh(db_review)
@@ -702,12 +715,13 @@ class PullRequestService:
         self.db.add(db_comment)
 
         # Sync with GitHub if integration exists (only for top-level comments)
-        if not comment_create.parent_id:
-            github_integration = await self._get_github_integration(project_id)
-            if github_integration and github_integration.sync_enabled and pr.github_pr_number:
+        if not comment_create.parent_id and pr.github_pr_number:
+            gh_result = await self._get_github_token(project_id)
+            if gh_result:
+                github_integration, token = gh_result
                 try:
                     gh_comment = await self.github_service.create_comment(
-                        installation_id=github_integration.installation_id,
+                        token=token,
                         owner=github_integration.repo_owner,
                         repo=github_integration.repo_name,
                         pr_number=pr.github_pr_number,
@@ -1097,16 +1111,21 @@ class PullRequestService:
                 detail="GitHub integration already exists. Delete it first to reconfigure.",
             )
 
-        # Generate webhook secret
-        webhook_secret = secrets.token_urlsafe(32)
+        # Generate webhook secret only if webhooks are enabled
+        webhook_secret = (
+            secrets.token_urlsafe(32) if integration_create.webhooks_enabled else None
+        )
 
         # Create integration
         db_integration = GitHubIntegration(
             project_id=project_id,
             repo_owner=integration_create.repo_owner,
             repo_name=integration_create.repo_name,
-            installation_id=integration_create.installation_id,
+            installation_id=None,
             webhook_secret=webhook_secret,
+            connected_by_user_id=user.id,
+            webhooks_enabled=integration_create.webhooks_enabled,
+            default_branch=integration_create.default_branch,
         )
         self.db.add(db_integration)
 
@@ -1145,6 +1164,11 @@ class PullRequestService:
             integration.default_branch = integration_update.default_branch
         if integration_update.sync_enabled is not None:
             integration.sync_enabled = integration_update.sync_enabled
+        if integration_update.webhooks_enabled is not None:
+            integration.webhooks_enabled = integration_update.webhooks_enabled
+            # Generate webhook secret if enabling webhooks and none exists
+            if integration_update.webhooks_enabled and not integration.webhook_secret:
+                integration.webhook_secret = secrets.token_urlsafe(32)
 
         await self.db.commit()
         await self.db.refresh(integration)
@@ -1393,6 +1417,34 @@ class PullRequestService:
         )
         return result.scalar_one_or_none()
 
+    async def _get_github_token(
+        self, project_id: UUID
+    ) -> tuple[GitHubIntegration, str] | None:
+        """Resolve a PAT for GitHub API calls on this project.
+
+        Looks up integration -> connected_by_user_id -> UserGitHubToken -> decrypt.
+        Returns None if any link is missing (graceful degradation).
+        """
+        integration = await self._get_github_integration(project_id)
+        if not integration or not integration.sync_enabled:
+            return None
+        if not integration.connected_by_user_id:
+            return None
+        result = await self.db.execute(
+            select(UserGitHubToken).where(
+                UserGitHubToken.user_id == integration.connected_by_user_id
+            )
+        )
+        token_row = result.scalar_one_or_none()
+        if not token_row:
+            return None
+        try:
+            token = decrypt_token(token_row.encrypted_token)
+        except Exception:
+            logger.warning("Failed to decrypt GitHub token for user %s", integration.connected_by_user_id)
+            return None
+        return integration, token
+
     def _can_view(self, project: Project, user: CurrentUser | None) -> bool:
         """Check if user can view the project."""
         if project.is_public:
@@ -1525,7 +1577,8 @@ class PullRequestService:
             repo_owner=integration.repo_owner,
             repo_name=integration.repo_name,
             repo_url=f"https://github.com/{integration.repo_owner}/{integration.repo_name}",
-            installation_id=integration.installation_id,
+            connected_by_user_id=integration.connected_by_user_id,
+            webhooks_enabled=integration.webhooks_enabled,
             default_branch=integration.default_branch,
             sync_enabled=integration.sync_enabled,
             last_sync_at=integration.last_sync_at,

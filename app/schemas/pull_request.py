@@ -236,7 +236,8 @@ class GitHubIntegrationCreate(BaseModel):
 
     repo_owner: str = Field(..., min_length=1, max_length=255)
     repo_name: str = Field(..., min_length=1, max_length=255)
-    installation_id: int
+    default_branch: str = Field(default="main", min_length=1, max_length=255)
+    webhooks_enabled: bool = False
 
 
 class GitHubIntegrationUpdate(BaseModel):
@@ -244,6 +245,7 @@ class GitHubIntegrationUpdate(BaseModel):
 
     default_branch: str | None = Field(None, min_length=1, max_length=255)
     sync_enabled: bool | None = None
+    webhooks_enabled: bool | None = None
 
 
 class GitHubIntegrationResponse(BaseModel):
@@ -254,7 +256,8 @@ class GitHubIntegrationResponse(BaseModel):
     repo_owner: str
     repo_name: str
     repo_url: str | None = None
-    installation_id: int
+    connected_by_user_id: str | None = None
+    webhooks_enabled: bool = False
     default_branch: str
     sync_enabled: bool
     last_sync_at: datetime | None = None

@@ -183,11 +183,17 @@ class GitHubIntegration(Base):
     repo_owner: Mapped[str] = mapped_column(String(255), nullable=False)
     repo_name: Mapped[str] = mapped_column(String(255), nullable=False)
 
-    # GitHub App installation
-    installation_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    # GitHub App installation (legacy, nullable for PAT-based auth)
+    installation_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # Webhook secret for signature verification
-    webhook_secret: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Webhook secret for signature verification (nullable when webhooks disabled)
+    webhook_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # PAT-based auth: the user who connected this integration
+    connected_by_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Whether GitHub webhooks are enabled for this integration
+    webhooks_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Branch settings
     default_branch: Mapped[str] = mapped_column(String(255), default="main")

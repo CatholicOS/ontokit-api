@@ -12,6 +12,7 @@ from app.api.v1 import (
     properties,
     pull_requests,
     search,
+    user_settings,
 )
 
 router = APIRouter()
@@ -25,3 +26,4 @@ router.include_router(ontologies.router, prefix="/ontologies", tags=["Ontologies
 router.include_router(classes.router, tags=["Classes"])
 router.include_router(properties.router, tags=["Properties"])
 router.include_router(search.router, prefix="/search", tags=["Search"])
+router.include_router(user_settings.router, prefix="/users", tags=["User Settings"])

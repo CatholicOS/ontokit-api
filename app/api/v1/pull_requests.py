@@ -531,6 +531,18 @@ async def github_webhook(
             detail="GitHub integration not found",
         )
 
+    if not integration.webhooks_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Webhooks are not enabled for this integration",
+        )
+
+    if not integration.webhook_secret:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Webhook secret is not configured",
+        )
+
     # Verify signature
     expected_signature = "sha256=" + hmac.new(
         integration.webhook_secret.encode("utf-8"),

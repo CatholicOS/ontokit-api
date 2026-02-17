@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     # GitHub Integration
     github_app_id: str = ""
     github_app_private_key: str = ""
+    github_token_encryption_key: str = ""
 
     # Superadmin - comma-separated list of user IDs with full system access
     superadmin_user_ids: str = ""

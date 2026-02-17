@@ -16,6 +16,7 @@ from app.models.pull_request import (
     PullRequestReview,
     ReviewStatus,
 )
+from app.models.user_github_token import UserGitHubToken
 
 __all__ = [
     "BranchMetadata",
@@ -31,4 +32,5 @@ __all__ = [
     "LintRunStatus",
     "LintIssue",
     "LintIssueType",
+    "UserGitHubToken",
 ]

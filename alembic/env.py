@@ -20,7 +20,7 @@ if config.config_file_name is not None:
 
 # Import all models so they are registered with Base.metadata
 from app.core.database import Base  # noqa: E402
-from app.models import BranchMetadata, Project, ProjectMember  # noqa: E402, F401
+from app.models import BranchMetadata, Project, ProjectMember, UserGitHubToken  # noqa: E402, F401
 
 target_metadata = Base.metadata
 
