@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 from uuid import UUID
 
@@ -339,6 +340,27 @@ class ProjectService:
                 github_token,
             )
             logger.info(f"Cloned GitHub repo {repo_owner}/{repo_name} for project {db_project.id}")
+
+            # After cloning, commit normalized content to the correct path in git.
+            # The clone contains the original (un-normalized) file content, but the
+            # editor loads from git, so it needs to see the normalized version.
+            if self.git_service.repository_exists(db_project.id):
+                try:
+                    git_file_path = turtle_file_path or ontology_file_path
+                    self.git_service.commit_changes(
+                        project_id=db_project.id,
+                        ontology_content=normalized_content,
+                        filename=git_file_path,
+                        message="Normalize ontology to canonical Turtle format",
+                        author_name=owner.name,
+                        author_email=owner.email,
+                        branch_name=default_branch,
+                    )
+                    logger.info(f"Committed normalized content to git for project {db_project.id}")
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to commit normalized content for project {db_project.id}: {e}"
+                    )
         except Exception as e:
             logger.warning(
                 f"Failed to clone GitHub repo for project {db_project.id}: {e}. "
@@ -516,17 +538,32 @@ class ProjectService:
             else:
                 object_name = project.source_file_path
 
-            # Download current ontology content
-            content = await storage.download_file(object_name)
+            # Compute the actual git filename (may differ from MinIO basename for GitHub
+            # projects, e.g. "source/ontology-semantic-canon.ttl" vs "ontology.ttl")
+            git_filename = self._get_git_ontology_path(project)
 
-            # Get the filename from the path
-            filename = Path(object_name).name
+            # For GitHub-cloned projects, git is the source of truth — the editor
+            # loads from git, so MinIO content may be stale.  Read from git when
+            # a repository exists to ensure we update the correct content.
+            content: bytes | None = None
+            if self.git_service.repository_exists(project.id):
+                try:
+                    branch = self.git_service.get_default_branch(project.id)
+                    content = self.git_service.get_file_at_version(
+                        project.id, git_filename, branch
+                    ).encode("utf-8")
+                except Exception:
+                    # Fall back to MinIO below
+                    content = None
+
+            if content is None:
+                content = await storage.download_file(object_name)
 
             # Update metadata in the RDF
             updater = OntologyMetadataUpdater()
             updated_content, changes = updater.update_metadata(
                 content=content,
-                filename=filename,
+                filename=git_filename,
                 new_title=new_name,
                 new_description=new_description,
             )
@@ -535,10 +572,10 @@ class ProjectService:
                 logger.debug(f"No RDF changes needed for project {project.id}")
                 return None
 
-            # Upload updated content to storage
+            # Upload updated content to MinIO (keeps MinIO in sync)
             await storage.upload_file(object_name, updated_content, "text/turtle")
 
-            # Commit to git
+            # Commit to git using the correct file path
             if self.git_service.repository_exists(project.id):
                 # Build commit message
                 change_lines = "\n".join(f"- {change}" for change in changes)
@@ -547,7 +584,7 @@ class ProjectService:
                 commit_info = self.git_service.commit_changes(
                     project_id=project.id,
                     ontology_content=updated_content,
-                    filename=filename,
+                    filename=git_filename,
                     message=commit_message,
                     author_name=user.name,
                     author_email=user.email,
@@ -850,6 +887,19 @@ class ProjectService:
                 return member.role  # type: ignore[return-value]
         return None
 
+    def _get_git_ontology_path(self, project: Project) -> str:
+        """Get the actual file path within the git repo for a project's ontology."""
+        if project.github_integration:
+            path = (
+                project.github_integration.turtle_file_path
+                or project.github_integration.ontology_file_path
+            )
+            if path:
+                return path
+        if project.source_file_path:
+            return os.path.basename(project.source_file_path)
+        return "ontology.ttl"
+
     def _to_response(self, project: Project, user: CurrentUser | None) -> ProjectResponse:
         """Convert Project model to response schema."""
         user_role = None
@@ -879,15 +929,8 @@ class ProjectService:
 
         # Compute git_ontology_path: the actual file path within the git repo
         git_ontology_path: str | None = None
-        if project.github_integration:
-            git_ontology_path = (
-                project.github_integration.turtle_file_path
-                or project.github_integration.ontology_file_path
-            )
-        elif project.source_file_path:
-            import os
-
-            git_ontology_path = os.path.basename(project.source_file_path)
+        if project.github_integration or project.source_file_path:
+            git_ontology_path = self._get_git_ontology_path(project)
 
         return ProjectResponse(
             id=project.id,
