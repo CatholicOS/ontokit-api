@@ -71,7 +71,7 @@ class ProjectService:
         self.db.add(owner_member)
 
         await self.db.commit()
-        await self.db.refresh(db_project, ["members"])
+        await self.db.refresh(db_project, ["members", "github_integration"])
 
         return self._to_response(db_project, owner)
 
@@ -186,7 +186,7 @@ class ProjectService:
         # Refresh all attributes including updated_at and members relationship
         await self.db.refresh(db_project)
         # Explicitly load members relationship
-        await self.db.refresh(db_project, ["members"])
+        await self.db.refresh(db_project, ["members", "github_integration"])
 
         # Initialize git repository for version control
         commit_hash: str | None = None
@@ -351,7 +351,7 @@ class ProjectService:
 
         await self.db.commit()
         await self.db.refresh(db_project)
-        await self.db.refresh(db_project, ["members"])
+        await self.db.refresh(db_project, ["members", "github_integration"])
 
         # Clone the entire repo as bare git in a background thread
         repo_url = f"https://github.com/{repo_owner}/{repo_name}.git"
@@ -452,7 +452,9 @@ class ProjectService:
             filter_type: Filter by 'public', 'mine', or None for all accessible
         """
         # Build base query
-        query = select(Project).options(selectinload(Project.members))
+        query = select(Project).options(
+            selectinload(Project.members), selectinload(Project.github_integration)
+        )
 
         if user is None:
             # Anonymous: only public projects
