@@ -282,7 +282,7 @@ class BareOntologyRepository:
         if parent_tree:
             try:
                 entry = parent_tree[dir_name]
-                if entry.type == pygit2.GIT_OBJ_TREE:
+                if entry.type == pygit2.GIT_OBJECT_TREE:
                     existing_subtree = self.repo.get(entry.id)
             except KeyError:
                 pass
@@ -458,9 +458,9 @@ class BareOntologyRepository:
             def walk_tree(tree: pygit2.Tree, prefix: str = "") -> None:
                 for entry in tree:
                     path = f"{prefix}{entry.name}" if prefix else entry.name
-                    if entry.type == pygit2.GIT_OBJ_BLOB:
+                    if entry.type == pygit2.GIT_OBJECT_BLOB:
                         files.append(path)
-                    elif entry.type == pygit2.GIT_OBJ_TREE:
+                    elif entry.type == pygit2.GIT_OBJECT_TREE:
                         subtree = self.repo.get(entry.id)
                         walk_tree(subtree, f"{path}/")
 

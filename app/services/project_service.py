@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.auth import CurrentUser
 from app.git import GitRepositoryService, get_git_service
+from app.models.normalization import NormalizationRun
 from app.models.project import Project, ProjectMember
 from app.models.pull_request import GitHubIntegration
 from app.schemas.project import (
@@ -188,8 +189,9 @@ class ProjectService:
         await self.db.refresh(db_project, ["members"])
 
         # Initialize git repository for version control
+        commit_hash: str | None = None
         try:
-            self.git_service.initialize_repository(
+            init_commit = self.git_service.initialize_repository(
                 project_id=db_project.id,
                 ontology_content=normalized_content,
                 filename="ontology.ttl",
@@ -197,10 +199,31 @@ class ProjectService:
                 author_email=owner.email,
                 project_name=project_name,
             )
+            commit_hash = init_commit.hash
             logger.info(f"Initialized git repository for project {db_project.id}")
         except Exception as e:
             # Log the error but don't fail the import - git is supplementary
             logger.warning(f"Failed to initialize git repository for project {db_project.id}: {e}")
+
+        # Record normalization run for history tracking
+        if normalization_report_json is not None:
+            run = NormalizationRun(
+                project_id=db_project.id,
+                triggered_by=owner.id,
+                trigger_type="import",
+                report_json=normalization_report_json,
+                original_format=normalization_report.original_format,
+                original_size_bytes=normalization_report.original_size_bytes,
+                normalized_size_bytes=normalization_report.normalized_size_bytes,
+                triple_count=normalization_report.triple_count,
+                prefixes_removed_count=len(normalization_report.prefixes_removed),
+                prefixes_added_count=len(normalization_report.prefixes_added),
+                format_converted=normalization_report.format_converted,
+                is_dry_run=False,
+                commit_hash=commit_hash,
+            )
+            self.db.add(run)
+            await self.db.commit()
 
         return self._to_import_response(db_project, owner, file_path)
 
@@ -332,6 +355,7 @@ class ProjectService:
 
         # Clone the entire repo as bare git in a background thread
         repo_url = f"https://github.com/{repo_owner}/{repo_name}.git"
+        commit_hash: str | None = None
         try:
             await asyncio.to_thread(
                 self.git_service.clone_from_github,
@@ -347,7 +371,7 @@ class ProjectService:
             if self.git_service.repository_exists(db_project.id):
                 try:
                     git_file_path = turtle_file_path or ontology_file_path
-                    self.git_service.commit_changes(
+                    normalize_commit = self.git_service.commit_changes(
                         project_id=db_project.id,
                         ontology_content=normalized_content,
                         filename=git_file_path,
@@ -356,6 +380,7 @@ class ProjectService:
                         author_email=owner.email,
                         branch_name=default_branch,
                     )
+                    commit_hash = normalize_commit.hash
                     logger.info(f"Committed normalized content to git for project {db_project.id}")
                 except Exception as e:
                     logger.warning(
@@ -364,8 +389,49 @@ class ProjectService:
         except Exception as e:
             logger.warning(
                 f"Failed to clone GitHub repo for project {db_project.id}: {e}. "
-                "Project was created successfully with MinIO storage."
+                "Falling back to local git init."
             )
+            # Fall back to initializing a fresh local git repo so the project
+            # has revision history even when the clone fails.
+            try:
+                git_file_path = turtle_file_path or ontology_file_path
+                init_commit = self.git_service.initialize_repository(
+                    project_id=db_project.id,
+                    ontology_content=normalized_content,
+                    filename=git_file_path,
+                    author_name=owner.name,
+                    author_email=owner.email,
+                    project_name=project_name,
+                )
+                commit_hash = init_commit.hash
+                logger.info(
+                    f"Initialized fallback git repository for project {db_project.id}"
+                )
+            except Exception as init_err:
+                logger.warning(
+                    f"Failed to initialize fallback git repo for project {db_project.id}: "
+                    f"{init_err}"
+                )
+
+        # Record normalization run for history tracking
+        if normalization_report_json is not None:
+            run = NormalizationRun(
+                project_id=db_project.id,
+                triggered_by=owner.id,
+                trigger_type="import",
+                report_json=normalization_report_json,
+                original_format=normalization_report.original_format,
+                original_size_bytes=normalization_report.original_size_bytes,
+                normalized_size_bytes=normalization_report.normalized_size_bytes,
+                triple_count=normalization_report.triple_count,
+                prefixes_removed_count=len(normalization_report.prefixes_removed),
+                prefixes_added_count=len(normalization_report.prefixes_added),
+                format_converted=normalization_report.format_converted,
+                is_dry_run=False,
+                commit_hash=commit_hash,
+            )
+            self.db.add(run)
+            await self.db.commit()
 
         return self._to_import_response(db_project, owner, file_path)
 

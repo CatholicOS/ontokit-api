@@ -51,6 +51,15 @@ class NormalizationReport:
         }
 
 
+WELL_KNOWN_PREFIXES: dict[str, str] = {
+    "dc": "http://purl.org/dc/elements/1.1/",
+    "dcterms": "http://purl.org/dc/terms/",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "foaf": "http://xmlns.com/foaf/0.1/",
+    "vann": "http://purl.org/vocab/vann/",
+}
+
+
 class OntologyParseError(Exception):
     """Exception raised when ontology parsing fails."""
 
@@ -224,6 +233,10 @@ class OntologyMetadataExtractor:
         else:
             # Use the original graph (faster but non-deterministic bnode ordering)
             output_graph = graph
+
+        # Ensure well-known namespaces get standard prefix names
+        for prefix, ns in WELL_KNOWN_PREFIXES.items():
+            output_graph.bind(prefix, Namespace(ns), override=True)
 
         # Serialize to Turtle (canonical format)
         normalized = output_graph.serialize(format="turtle")
