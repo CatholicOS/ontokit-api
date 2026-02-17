@@ -238,8 +238,11 @@ class OntologyMetadataExtractor:
         for prefix, ns in WELL_KNOWN_PREFIXES.items():
             output_graph.bind(prefix, Namespace(ns), override=True)
 
+        # Detect ontology IRI to preserve as @base directive
+        base_iri = self._find_ontology_iri(output_graph)
+
         # Serialize to Turtle (canonical format)
-        normalized = output_graph.serialize(format="turtle")
+        normalized = output_graph.serialize(format="turtle", base=base_iri)
         if isinstance(normalized, str):
             normalized = normalized.encode("utf-8")
 
@@ -633,8 +636,8 @@ class OntologyMetadataUpdater:
                 graph.add((ontology_iri, DC.description, Literal(new_description)))
                 changes.append("Description (dc:description): added")
 
-        # Serialize to Turtle (canonical format)
-        updated_content = graph.serialize(format="turtle")
+        # Serialize to Turtle (canonical format), preserving @base directive
+        updated_content = graph.serialize(format="turtle", base=str(ontology_iri))
         if isinstance(updated_content, str):
             updated_content = updated_content.encode("utf-8")
 

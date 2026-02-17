@@ -218,7 +218,16 @@ class OntologyService:
     ) -> str:
         """Serialize ontology to string in specified format."""
         graph = await self._get_graph(ontology_id, branch)
-        return graph.serialize(format=format)
+        base = self._find_ontology_iri(graph)
+        return graph.serialize(format=format, base=base)
+
+    @staticmethod
+    def _find_ontology_iri(graph: Graph) -> str | None:
+        """Find the ontology IRI (subject of rdf:type owl:Ontology) for @base."""
+        for subject in graph.subjects(RDF.type, OWL.Ontology):
+            if isinstance(subject, URIRef):
+                return str(subject)
+        return None
 
     async def import_from_file(
         self,

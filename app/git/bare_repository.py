@@ -13,7 +13,7 @@ from typing import Any
 from uuid import UUID
 
 import pygit2
-from rdflib import Graph
+from rdflib import Graph, URIRef
 from rdflib.compare import graph_diff, to_isomorphic
 
 from app.core.config import settings
@@ -1230,14 +1230,25 @@ def get_bare_git_service() -> BareGitRepositoryService:
     return BareGitRepositoryService()
 
 
+def _find_ontology_iri(graph: Graph) -> str | None:
+    """Find the ontology IRI (subject of rdf:type owl:Ontology) for @base."""
+    from rdflib.namespace import OWL, RDF
+
+    for subject in graph.subjects(RDF.type, OWL.Ontology):
+        if isinstance(subject, URIRef):
+            return str(subject)
+    return None
+
+
 def serialize_deterministic(graph: Graph) -> str:
     """
     Serialize graph to Turtle with deterministic triple ordering.
 
     This ensures consistent diffs in version control.
     """
+    base = _find_ontology_iri(graph)
     iso_graph = to_isomorphic(graph)
-    return iso_graph.serialize(format="turtle")
+    return iso_graph.serialize(format="turtle", base=base)
 
 
 def semantic_diff(old_graph: Graph, new_graph: Graph) -> dict[str, Any]:
