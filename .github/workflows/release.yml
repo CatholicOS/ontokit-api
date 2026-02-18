@@ -1,0 +1,102 @@
+name: Distribution
+
+on:
+  push:
+    branches-ignore: [renovate/**]
+    tags: [axigraph-*]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv sync --dev
+      - run: uv run ruff check axigraph/
+      - run: uv run ruff format --check axigraph/
+      - run: uv run mypy axigraph/
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv sync --dev
+      - run: uv run pytest tests/ -v --cov=axigraph
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv build
+      - run: uv run twine check --strict dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish_pypi:
+    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/axigraph-')
+    needs: [lint, test, build]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: astral-sh/setup-uv@v4
+      - run: uv publish --trusted-publishing always
+        working-directory: dist
+
+  publish_github:
+    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/axigraph-')
+    needs: [lint, test, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: ncipollo/release-action@v1
+        with:
+          artifacts: dist/*
+          generateReleaseNotes: true
+
+  publish_docker:
+    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/axigraph-')
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/axigraph
+          tags: |
+            type=semver,pattern={{version}},value=${{ github.ref_name }},prefix=
+            type=semver,pattern={{major}}.{{minor}},value=${{ github.ref_name }},prefix=
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.prod
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
