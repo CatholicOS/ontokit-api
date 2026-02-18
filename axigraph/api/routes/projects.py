@@ -25,7 +25,7 @@ from axigraph.git import GitRepositoryService, get_git_service
 from axigraph.models.branch_metadata import BranchMetadata
 from axigraph.models.pull_request import PRStatus, PullRequest
 from axigraph.models.user_github_token import UserGitHubToken
-from axigraph.schemas.owl_class import OWLClassResponse, OWLClassTreeResponse
+from axigraph.schemas.owl_class import EntitySearchResponse, OWLClassResponse, OWLClassTreeResponse
 from axigraph.schemas.project import (
     BranchCreate,
     BranchInfo,
@@ -634,6 +634,44 @@ async def get_ontology_class_ancestors(
     total_classes = await ontology.get_class_count(project_id, resolved_branch)
 
     return OWLClassTreeResponse(nodes=nodes, total_classes=total_classes)
+
+
+@router.get("/{project_id}/ontology/search", response_model=EntitySearchResponse)
+async def search_ontology_entities(
+    project_id: UUID,
+    service: Annotated[ProjectService, Depends(get_service)],
+    ontology: Annotated[OntologyService, Depends(get_ontology)],
+    git: Annotated[GitRepositoryService, Depends(get_git)],
+    user: OptionalUser,
+    q: str = Query(..., min_length=1, max_length=200, description="Search query"),
+    entity_types: str | None = Query(
+        default=None,
+        description="Comma-separated entity types: class,property,individual",
+    ),
+    branch: str | None = Query(default=None, description="Branch to read from"),
+) -> EntitySearchResponse:
+    """
+    Search for entities in the ontology by name.
+
+    Matches against labels, local names, and full IRIs (case-insensitive substring).
+    Returns up to 50 results sorted by relevance (prefix matches first).
+    """
+    resolved_branch = branch or git.get_default_branch(project_id)
+    project = await _ensure_ontology_loaded(
+        project_id, service, ontology, user, resolved_branch, git
+    )
+
+    parsed_types = None
+    if entity_types:
+        parsed_types = [t.strip() for t in entity_types.split(",") if t.strip()]
+
+    return await ontology.search_entities(
+        project_id,
+        query=q,
+        entity_types=parsed_types,
+        label_preferences=project.label_preferences,
+        branch=resolved_branch,
+    )
 
 
 # Revision history endpoints

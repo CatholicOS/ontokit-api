@@ -1,5 +1,7 @@
 """OWL Class schemas."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, HttpUrl
 
 from axigraph.schemas.ontology import LocalizedString
@@ -97,3 +99,19 @@ class OWLClassTreeResponse(BaseModel):
 
     nodes: list[OWLClassTreeNode]
     total_classes: int = Field(0, description="Total number of classes in the ontology")
+
+
+class EntitySearchResult(BaseModel):
+    """A single entity search result."""
+
+    iri: str
+    label: str
+    entity_type: Literal["class", "property", "individual"]
+    deprecated: bool = False
+
+
+class EntitySearchResponse(BaseModel):
+    """Response for entity search."""
+
+    results: list[EntitySearchResult]
+    total: int

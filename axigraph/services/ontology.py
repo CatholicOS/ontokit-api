@@ -17,6 +17,8 @@ from axigraph.schemas.ontology import (
 )
 from axigraph.schemas.owl_class import (
     AnnotationProperty,
+    EntitySearchResponse,
+    EntitySearchResult,
     OWLClassCreate,
     OWLClassListResponse,
     OWLClassResponse,
@@ -435,6 +437,109 @@ class OntologyService:
             for s in graph.subjects(RDF.type, OWL.Class)
             if isinstance(s, URIRef) and s != OWL.Thing
         )
+
+    async def search_entities(
+        self,
+        project_id: UUID,
+        query: str,
+        entity_types: list[str] | None = None,
+        label_preferences: list[str] | None = None,
+        limit: int = 50,
+        branch: str = "main",
+    ) -> EntitySearchResponse:
+        """
+        Search for entities (classes, properties, individuals) by name.
+
+        Matches against labels, local names, and full IRIs (case-insensitive substring).
+        """
+        graph = await self._get_graph(project_id, branch)
+        query_lower = query.lower()
+
+        # Map entity type names to (RDF type, result entity_type)
+        type_mapping: dict[str, list[tuple[URIRef, str]]] = {
+            "class": [(OWL.Class, "class")],
+            "property": [
+                (OWL.ObjectProperty, "property"),
+                (OWL.DatatypeProperty, "property"),
+                (OWL.AnnotationProperty, "property"),
+            ],
+            "individual": [(OWL.NamedIndividual, "individual")],
+        }
+
+        allowed_types = entity_types or ["class", "property", "individual"]
+        rdf_types: list[tuple[URIRef, str]] = []
+        for t in allowed_types:
+            if t in type_mapping:
+                rdf_types.extend(type_mapping[t])
+
+        owl_thing = OWL.Thing
+        results: list[EntitySearchResult] = []
+
+        for rdf_type, entity_type in rdf_types:
+            for subject in graph.subjects(RDF.type, rdf_type):
+                if not isinstance(subject, URIRef):
+                    continue
+                if subject == owl_thing:
+                    continue
+
+                iri_str = str(subject)
+
+                # Extract local name
+                if "#" in iri_str:
+                    local_name = iri_str.split("#")[-1]
+                else:
+                    local_name = iri_str.rsplit("/", 1)[-1]
+
+                # Collect all label values for matching
+                all_labels: list[str] = []
+                for label_prop in LABEL_PROPERTY_MAP.values():
+                    for obj in graph.objects(subject, label_prop):
+                        if isinstance(obj, RDFLiteral):
+                            all_labels.append(str(obj))
+
+                # Check for match
+                matched = (
+                    query_lower in local_name.lower()
+                    or query_lower in iri_str.lower()
+                    or any(query_lower in lbl.lower() for lbl in all_labels)
+                )
+
+                if not matched:
+                    continue
+
+                # Resolve display label
+                display_label = select_preferred_label(graph, subject, label_preferences)
+                if not display_label:
+                    display_label = local_name
+
+                # Check deprecated status
+                deprecated = False
+                for obj in graph.objects(subject, OWL.deprecated):
+                    if str(obj).lower() in ("true", "1"):
+                        deprecated = True
+                        break
+
+                results.append(
+                    EntitySearchResult(
+                        iri=iri_str,
+                        label=display_label,
+                        entity_type=entity_type,
+                        deprecated=deprecated,
+                    )
+                )
+
+        # Sort: exact prefix matches on label first, then alphabetical
+        def sort_key(r: EntitySearchResult) -> tuple[int, str]:
+            label_lower = r.label.lower()
+            if label_lower.startswith(query_lower):
+                return (0, label_lower)
+            return (1, label_lower)
+
+        results.sort(key=sort_key)
+        total = len(results)
+        results = results[:limit]
+
+        return EntitySearchResponse(results=results, total=total)
 
     async def get_ancestor_path(
         self,
