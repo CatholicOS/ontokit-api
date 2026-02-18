@@ -437,6 +437,10 @@ async def transfer_ownership(
     data: TransferOwnership,
     service: Annotated[ProjectService, Depends(get_service)],
     user_with_token: RequiredUserWithToken,
+    force: bool = Query(
+        default=False,
+        description="Force transfer even if GitHub integration will be disconnected",
+    ),
 ) -> MemberListResponse:
     """
     Transfer project ownership to an existing admin member.
@@ -444,9 +448,13 @@ async def transfer_ownership(
     Only the current project owner (or superadmin) can transfer ownership.
     The target user must be an admin member of the project.
     The current owner is demoted to admin.
+
+    If the project has a GitHub integration and the new owner does not have a
+    GitHub token, returns 409 unless force=true, in which case the integration
+    is removed.
     """
     user, access_token = user_with_token
-    return await service.transfer_ownership(project_id, data, user, access_token)
+    return await service.transfer_ownership(project_id, data, user, access_token, force=force)
 
 
 # Ontology tree navigation endpoints

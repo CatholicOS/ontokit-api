@@ -17,6 +17,7 @@ from axigraph.git import GitRepositoryService, get_git_service
 from axigraph.models.normalization import NormalizationRun
 from axigraph.models.project import Project, ProjectMember
 from axigraph.models.pull_request import GitHubIntegration
+from axigraph.models.user_github_token import UserGitHubToken
 from axigraph.schemas.project import (
     MemberCreate,
     MemberListResponse,
@@ -951,6 +952,7 @@ class ProjectService:
         transfer: TransferOwnership,
         user: CurrentUser,
         access_token: str | None = None,
+        force: bool = False,
     ) -> MemberListResponse:
         """Transfer project ownership to an existing admin member.
 
@@ -959,6 +961,7 @@ class ProjectService:
             transfer: Transfer data containing the new owner's user_id
             user: The current user (must be owner or superadmin)
             access_token: Optional access token for fetching user info
+            force: If True, proceed even if GitHub integration will be disconnected
 
         Returns:
             Updated member list
@@ -1002,10 +1005,47 @@ class ProjectService:
                 detail="Could not find current owner member record",
             )
 
+        # Check GitHub integration impact before transferring
+        if project.github_integration:
+            result = await self.db.execute(
+                select(UserGitHubToken).where(UserGitHubToken.user_id == transfer.new_owner_id)
+            )
+            new_owner_token = result.scalar_one_or_none()
+
+            if new_owner_token is None and not force:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "The new owner does not have a GitHub token configured. "
+                        "The GitHub integration will be disconnected if you proceed."
+                    ),
+                )
+
         # Atomically swap roles and update project owner
         current_owner_member.role = "admin"
         new_owner_member.role = "owner"
         project.owner_id = transfer.new_owner_id
+
+        # Handle GitHub integration after ownership change
+        if project.github_integration:
+            result = await self.db.execute(
+                select(UserGitHubToken).where(UserGitHubToken.user_id == transfer.new_owner_id)
+            )
+            new_owner_token = result.scalar_one_or_none()
+
+            if new_owner_token is not None:
+                project.github_integration.connected_by_user_id = transfer.new_owner_id
+                logger.info(
+                    f"Transferred GitHub integration for project {project_id} "
+                    f"to new owner {transfer.new_owner_id}"
+                )
+            else:
+                # force=True at this point (checked above)
+                await self.db.delete(project.github_integration)
+                logger.info(
+                    f"Deleted GitHub integration for project {project_id} "
+                    f"because new owner has no GitHub token"
+                )
 
         await self.db.commit()
         await self.db.refresh(project, ["members"])
