@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     auth,
     classes,
+    join_requests,
     lint,
     normalization,
     ontologies,
@@ -20,6 +21,7 @@ router = APIRouter()
 router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 router.include_router(projects.router, prefix="/projects", tags=["Projects"])
 router.include_router(pull_requests.router, prefix="/projects", tags=["Pull Requests"])
+router.include_router(join_requests.router, prefix="/projects", tags=["Join Requests"])
 router.include_router(lint.router, prefix="/projects", tags=["Lint"])
 router.include_router(normalization.router, prefix="/projects", tags=["Normalization"])
 router.include_router(ontologies.router, prefix="/ontologies", tags=["Ontologies"])

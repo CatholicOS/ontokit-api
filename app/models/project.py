@@ -8,6 +8,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, Uni
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 if TYPE_CHECKING:
+    from app.models.join_request import JoinRequest
     from app.models.lint import LintRun
     from app.models.normalization import NormalizationRun
     from app.models.pull_request import GitHubIntegration, PullRequest
@@ -60,6 +61,9 @@ class Project(Base):
         back_populates="project", cascade="all, delete-orphan"
     )
     normalization_runs: Mapped[list["NormalizationRun"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan"
+    )
+    join_requests: Mapped[list["JoinRequest"]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
 
