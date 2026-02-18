@@ -46,6 +46,7 @@ from axigraph.schemas.project import (
     RevisionHistoryResponse,
     SourceContentSave,
     SourceContentSaveResponse,
+    TransferOwnership,
 )
 from axigraph.schemas.pull_request import (
     GitHubRepoFileInfo,
@@ -428,6 +429,24 @@ async def remove_member(
     Cannot remove the project owner.
     """
     await service.remove_member(project_id, user_id, user)
+
+
+@router.post("/{project_id}/transfer-ownership", response_model=MemberListResponse)
+async def transfer_ownership(
+    project_id: UUID,
+    data: TransferOwnership,
+    service: Annotated[ProjectService, Depends(get_service)],
+    user_with_token: RequiredUserWithToken,
+) -> MemberListResponse:
+    """
+    Transfer project ownership to an existing admin member.
+
+    Only the current project owner (or superadmin) can transfer ownership.
+    The target user must be an admin member of the project.
+    The current owner is demoted to admin.
+    """
+    user, access_token = user_with_token
+    return await service.transfer_ownership(project_id, data, user, access_token)
 
 
 # Ontology tree navigation endpoints

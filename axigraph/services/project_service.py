@@ -31,6 +31,7 @@ from axigraph.schemas.project import (
     ProjectResponse,
     ProjectRole,
     ProjectUpdate,
+    TransferOwnership,
 )
 from axigraph.services.ontology_extractor import (
     OntologyMetadataExtractor,
@@ -941,6 +942,74 @@ class ProjectService:
 
         await self.db.delete(db_member)
         await self.db.commit()
+
+    async def transfer_ownership(
+        self,
+        project_id: UUID,
+        transfer: TransferOwnership,
+        user: CurrentUser,
+        access_token: str | None = None,
+    ) -> MemberListResponse:
+        """Transfer project ownership to an existing admin member.
+
+        Args:
+            project_id: The project's UUID
+            transfer: Transfer data containing the new owner's user_id
+            user: The current user (must be owner or superadmin)
+            access_token: Optional access token for fetching user info
+
+        Returns:
+            Updated member list
+
+        Raises:
+            HTTPException: If validation fails or user lacks permission
+        """
+        project = await self._get_project(project_id)
+
+        # Only the current owner or a superadmin can transfer ownership
+        if project.owner_id != user.id and not user.is_superadmin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the project owner can transfer ownership",
+            )
+
+        # Find the current owner member record
+        current_owner_member = None
+        new_owner_member = None
+        for member in project.members:
+            if member.role == "owner":
+                current_owner_member = member
+            if member.user_id == transfer.new_owner_id:
+                new_owner_member = member
+
+        if new_owner_member is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Target user is not a member of this project",
+            )
+
+        if new_owner_member.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Ownership can only be transferred to an admin member",
+            )
+
+        if current_owner_member is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Could not find current owner member record",
+            )
+
+        # Atomically swap roles and update project owner
+        current_owner_member.role = "admin"
+        new_owner_member.role = "owner"
+        project.owner_id = transfer.new_owner_id
+
+        await self.db.commit()
+        await self.db.refresh(project, ["members"])
+
+        # Return updated member list with user info
+        return await self.list_members(project_id, user, access_token)
 
     # Helper methods
 

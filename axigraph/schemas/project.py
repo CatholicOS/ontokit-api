@@ -131,6 +131,12 @@ class MemberUpdate(BaseModel):
     role: ProjectRole
 
 
+class TransferOwnership(BaseModel):
+    """Schema for transferring project ownership to another member."""
+
+    new_owner_id: str
+
+
 class MemberUser(BaseModel):
     """User information for member responses."""
 
