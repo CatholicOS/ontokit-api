@@ -19,8 +19,8 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Import all models so they are registered with Base.metadata
-from app.core.database import Base  # noqa: E402
-from app.models import (  # noqa: E402, F401
+from axigraph.core.database import Base  # noqa: E402
+from axigraph.models import (  # noqa: E402, F401
     BranchMetadata,
     JoinRequest,
     Project,
@@ -31,7 +31,7 @@ from app.models import (  # noqa: E402, F401
 target_metadata = Base.metadata
 
 # Get database URL from app settings
-from app.core.config import settings  # noqa: E402
+from axigraph.core.config import settings  # noqa: E402
 
 # Convert asyncpg URL to use psycopg2 for sync operations if needed
 database_url = str(settings.database_url)

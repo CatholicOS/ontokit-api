@@ -1,6 +1,6 @@
 [project]
-name = "axigraph-api"
-version = "0.1.0"
+name = "axigraph"
+dynamic = ["version"]
 description = "Collaborative OWL ontology curation API"
 readme = "README.md"
 license = { text = "MIT" }
@@ -59,12 +59,19 @@ Homepage = "https://github.com/axigraph/axigraph-api"
 Documentation = "https://axigraph.github.io/docs"
 Repository = "https://github.com/axigraph/axigraph-api"
 
+[project.scripts]
+axigraph = "axigraph.runner:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.version]
+path = "axigraph/version.py"
+pattern = 'VERSION = "(?P<version>[^"]+?)(-dev|-rc)?"'
+
 [tool.hatch.build.targets.wheel]
-packages = ["app"]
+packages = ["axigraph"]
 
 [tool.ruff]
 target-version = "py311"
@@ -85,7 +92,7 @@ select = [
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["app"]
+known-first-party = ["axigraph"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -96,4 +103,4 @@ warn_unused_ignores = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-v --cov=app --cov-report=term-missing"
+addopts = "-v --cov=axigraph --cov-report=term-missing"
