@@ -881,7 +881,20 @@ class ProjectService:
         await self.db.commit()
         await self.db.refresh(db_member)
 
-        return self._member_to_response(db_member)
+        # Fetch user info from Zitadel so the response includes name/email
+        user_info: MemberUser | None = None
+        from axigraph.services.user_service import get_user_service
+
+        user_service = get_user_service()
+        fetched = await user_service.get_user_info(member_user_id)
+        if fetched:
+            user_info = MemberUser(
+                id=fetched["id"],
+                name=fetched["name"],
+                email=fetched["email"],
+            )
+
+        return self._member_to_response(db_member, user_info)
 
     async def remove_member(self, project_id: UUID, member_user_id: str, user: CurrentUser) -> None:
         """Remove a member from a project."""
