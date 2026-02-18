@@ -70,6 +70,8 @@ class BranchInfo:
     commit_date: datetime | None = None
     commits_ahead: int = 0
     commits_behind: int = 0
+    remote_commits_ahead: int | None = None
+    remote_commits_behind: int | None = None
 
 
 @dataclass
@@ -525,6 +527,21 @@ class BareOntologyRepository:
                 except Exception:
                     pass
 
+            # Calculate ahead/behind relative to remote tracking ref
+            remote_commits_ahead: int | None = None
+            remote_commits_behind: int | None = None
+            remote_ref_name = f"refs/remotes/origin/{branch_name}"
+            if remote_ref_name in self.repo.references:
+                try:
+                    remote_ref = self.repo.references[remote_ref_name]
+                    r_ahead, r_behind = self.repo.ahead_behind(
+                        ref.target, remote_ref.target
+                    )
+                    remote_commits_ahead = r_ahead
+                    remote_commits_behind = r_behind
+                except Exception:
+                    pass
+
             branches.append(
                 BranchInfo(
                     name=branch_name,
@@ -535,6 +552,8 @@ class BareOntologyRepository:
                     commit_date=datetime.fromtimestamp(commit.commit_time, tz=UTC),
                     commits_ahead=commits_ahead,
                     commits_behind=commits_behind,
+                    remote_commits_ahead=remote_commits_ahead,
+                    remote_commits_behind=remote_commits_behind,
                 )
             )
 

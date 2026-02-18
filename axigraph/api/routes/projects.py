@@ -23,7 +23,7 @@ from axigraph.core.database import get_db
 from axigraph.core.encryption import decrypt_token
 from axigraph.git import GitRepositoryService, get_git_service
 from axigraph.models.branch_metadata import BranchMetadata
-from axigraph.models.pull_request import PRStatus, PullRequest
+from axigraph.models.pull_request import GitHubIntegration, PRStatus, PullRequest
 from axigraph.models.user_github_token import UserGitHubToken
 from axigraph.schemas.owl_class import EntitySearchResponse, OWLClassResponse, OWLClassTreeResponse
 from axigraph.schemas.project import (
@@ -856,6 +856,15 @@ async def list_branches(
 
     branches = git.list_branches(project_id)
 
+    # Query GitHub integration for remote sync metadata
+    gh_result = await db.execute(
+        select(GitHubIntegration).where(GitHubIntegration.project_id == project_id)
+    )
+    gh_integration = gh_result.scalar_one_or_none()
+    has_github_remote = gh_integration is not None
+    last_sync_at = gh_integration.last_sync_at if gh_integration else None
+    sync_status = gh_integration.sync_status if gh_integration else None
+
     # Build metadata map: branch_name → BranchMetadata
     meta_result = await db.execute(
         select(BranchMetadata).where(BranchMetadata.project_id == project_id)
@@ -901,6 +910,8 @@ async def list_branches(
                 commit_date=b.commit_date,
                 commits_ahead=b.commits_ahead,
                 commits_behind=b.commits_behind,
+                remote_commits_ahead=b.remote_commits_ahead,
+                remote_commits_behind=b.remote_commits_behind,
                 created_by_id=meta.created_by_id if meta else None,
                 created_by_name=meta.created_by_name if meta else None,
                 has_open_pr=has_open_pr,
@@ -914,6 +925,9 @@ async def list_branches(
         current_branch=git.get_default_branch(project_id),
         default_branch=git.get_default_branch(project_id),
         preferred_branch=preferred,
+        has_github_remote=has_github_remote,
+        last_sync_at=last_sync_at,
+        sync_status=sync_status,
     )
 
 

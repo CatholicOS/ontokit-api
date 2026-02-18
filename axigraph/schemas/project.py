@@ -233,6 +233,8 @@ class BranchInfo(BaseModel):
     commit_date: datetime | None = None
     commits_ahead: int = 0
     commits_behind: int = 0
+    remote_commits_ahead: int | None = None
+    remote_commits_behind: int | None = None
     created_by_id: str | None = None
     created_by_name: str | None = None
     can_delete: bool = False
@@ -256,6 +258,9 @@ class BranchListResponse(BaseModel):
     current_branch: str
     default_branch: str
     preferred_branch: str | None = None
+    has_github_remote: bool = False
+    last_sync_at: datetime | None = None
+    sync_status: str | None = None
 
 
 # Source Content Schemas
