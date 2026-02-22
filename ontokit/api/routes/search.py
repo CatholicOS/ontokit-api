@@ -3,16 +3,20 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from ontokit.core.database import get_db
 from ontokit.schemas.search import SearchQuery, SearchResponse, SPARQLQuery, SPARQLResponse
 from ontokit.services.search import SearchService
 
 router = APIRouter()
 
 
-def get_search_service() -> SearchService:
-    """Dependency to get search service."""
-    return SearchService()
+def get_search_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SearchService:
+    """Dependency to get search service with database session."""
+    return SearchService(db=db)
 
 
 @router.get("", response_model=SearchResponse)

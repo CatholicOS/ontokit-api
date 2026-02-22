@@ -41,6 +41,7 @@ dependencies = [
     "pygithub>=2.5.0",
     "minio>=7.2.0",
     "websockets>=14.0",
+    "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]

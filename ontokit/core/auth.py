@@ -1,17 +1,38 @@
 """Authentication and authorization utilities."""
 
+import time
 from typing import Annotated
 
 import httpx
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ontokit.core.config import settings
 
 # HTTP Bearer token security scheme
 security = HTTPBearer(auto_error=False)
+
+# Zitadel roles claim key
+ZITADEL_ROLES_CLAIM = "urn:zitadel:iam:org:project:roles"
+
+# JWKS cache TTL in seconds (1 hour)
+_JWKS_CACHE_TTL = 3600
+
+
+def _extract_roles(payload: dict) -> list[str]:
+    """Extract role names from the Zitadel roles claim.
+
+    The Zitadel roles claim format is:
+        {"urn:zitadel:iam:org:project:roles": {"role_name": {"org_id": "org_name"}, ...}}
+
+    This function extracts just the role names (top-level keys of the roles dict).
+    """
+    roles_claim = payload.get(ZITADEL_ROLES_CLAIM)
+    if not roles_claim or not isinstance(roles_claim, dict):
+        return []
+    return list(roles_claim.keys())
 
 
 class TokenPayload(BaseModel):
@@ -27,6 +48,7 @@ class TokenPayload(BaseModel):
     email: str | None = None
     name: str | None = None
     preferred_username: str | None = None
+    roles: list[str] = Field(default_factory=list)  # Extracted from Zitadel roles claim
 
 
 class CurrentUser(BaseModel):
@@ -44,15 +66,21 @@ class CurrentUser(BaseModel):
         return self.id in settings.superadmin_ids
 
 
-# Cache for JWKS (JSON Web Key Set)
+# Cache for JWKS (JSON Web Key Set) with TTL
 _jwks_cache: dict | None = None
+_jwks_cache_time: float = 0.0
 
 
 async def get_jwks() -> dict:
-    """Fetch and cache the JWKS from Zitadel."""
-    global _jwks_cache
+    """Fetch and cache the JWKS from Zitadel.
 
-    if _jwks_cache is not None:
+    The cache expires after 1 hour (controlled by _JWKS_CACHE_TTL) to handle
+    key rotation while avoiding excessive network requests.
+    """
+    global _jwks_cache, _jwks_cache_time
+
+    now = time.monotonic()
+    if _jwks_cache is not None and (now - _jwks_cache_time) < _JWKS_CACHE_TTL:
         return _jwks_cache
 
     # Build headers - if using internal URL, set Host header to match external domain
@@ -83,6 +111,7 @@ async def get_jwks() -> dict:
             resp = await client.get(jwks_uri, headers=headers)
             resp.raise_for_status()
             _jwks_cache = resp.json()
+            _jwks_cache_time = time.monotonic()
             return _jwks_cache
         except httpx.HTTPError as e:
             raise HTTPException(
@@ -93,12 +122,17 @@ async def get_jwks() -> dict:
 
 def clear_jwks_cache() -> None:
     """Clear the JWKS cache (useful for testing or key rotation)."""
-    global _jwks_cache
+    global _jwks_cache, _jwks_cache_time
     _jwks_cache = None
+    _jwks_cache_time = 0.0
 
 
 async def validate_token(token: str) -> TokenPayload:
-    """Validate a JWT token and return its payload."""
+    """Validate a JWT token and return its payload.
+
+    Extracts Zitadel project roles from the token claims and includes them
+    in the returned TokenPayload.
+    """
     try:
         # Get JWKS for token verification
         jwks = await get_jwks()
@@ -129,7 +163,10 @@ async def validate_token(token: str) -> TokenPayload:
             options={"verify_aud": False},  # We'll verify audience manually if needed
         )
 
-        return TokenPayload(**payload)
+        # Extract roles from the Zitadel claim before constructing TokenPayload
+        roles = _extract_roles(payload)
+
+        return TokenPayload(**payload, roles=roles)
 
     except JWTError as e:
         raise HTTPException(
@@ -189,6 +226,7 @@ async def get_current_user(
     name = token_payload.name
     email = token_payload.email
     username = token_payload.preferred_username
+    roles = token_payload.roles
 
     if not name or not email:
         userinfo = await fetch_userinfo(credentials.credentials)
@@ -196,13 +234,16 @@ async def get_current_user(
             name = name or userinfo.get("name") or userinfo.get("preferred_username")
             email = email or userinfo.get("email")
             username = username or userinfo.get("preferred_username")
+            # Also extract roles from userinfo if not already present in token
+            if not roles:
+                roles = _extract_roles(userinfo)
 
     return CurrentUser(
         id=token_payload.sub,
         email=email,
         name=name,
         username=username,
-        roles=[],  # TODO: Extract roles from token claims
+        roles=roles,
     )
 
 
@@ -245,6 +286,7 @@ async def get_current_user_with_token(
     name = token_payload.name
     email = token_payload.email
     username = token_payload.preferred_username
+    roles = token_payload.roles
 
     if not name or not email:
         userinfo = await fetch_userinfo(credentials.credentials)
@@ -252,13 +294,16 @@ async def get_current_user_with_token(
             name = name or userinfo.get("name") or userinfo.get("preferred_username")
             email = email or userinfo.get("email")
             username = username or userinfo.get("preferred_username")
+            # Also extract roles from userinfo if not already present in token
+            if not roles:
+                roles = _extract_roles(userinfo)
 
     user = CurrentUser(
         id=token_payload.sub,
         email=email,
         name=name,
         username=username,
-        roles=[],
+        roles=roles,
     )
 
     return user, credentials.credentials
