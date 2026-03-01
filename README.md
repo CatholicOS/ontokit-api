@@ -56,7 +56,7 @@ uvicorn ontokit.main:app --reload
 
 ## Documentation
 
-See the [wiki](https://github.com/JohnRDOrazio/ontokit-api/wiki) for full documentation.
+See the [wiki](https://github.com/CatholicOS/ontokit-api/wiki) for full documentation.
 
 ## Tech Stack
 
