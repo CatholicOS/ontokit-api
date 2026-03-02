@@ -497,15 +497,16 @@ class OntologyService:
                         if isinstance(obj, RDFLiteral):
                             all_labels.append(str(obj))
 
-                # Check for match
-                matched = (
-                    query_lower in local_name.lower()
-                    or query_lower in iri_str.lower()
-                    or any(query_lower in lbl.lower() for lbl in all_labels)
-                )
+                # Check for match ("*" matches everything)
+                if query_lower != "*":
+                    matched = (
+                        query_lower in local_name.lower()
+                        or query_lower in iri_str.lower()
+                        or any(query_lower in lbl.lower() for lbl in all_labels)
+                    )
 
-                if not matched:
-                    continue
+                    if not matched:
+                        continue
 
                 # Resolve display label
                 display_label = select_preferred_label(graph, subject, label_preferences)
