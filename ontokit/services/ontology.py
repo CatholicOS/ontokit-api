@@ -394,7 +394,7 @@ class OntologyService:
         def sort_key(cls: OWLClassResponse) -> str:
             if cls.labels:
                 return cls.labels[0].value.lower()
-            return cls.iri.lower()
+            return str(cls.iri).lower()
 
         root_classes.sort(key=sort_key)
         return root_classes
@@ -424,7 +424,7 @@ class OntologyService:
         def sort_key(cls: OWLClassResponse) -> str:
             if cls.labels:
                 return cls.labels[0].value.lower()
-            return cls.iri.lower()
+            return str(cls.iri).lower()
 
         children.sort(key=sort_key)
         return children
