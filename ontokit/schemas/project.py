@@ -153,7 +153,7 @@ class MemberBase(BaseModel):
     """Base member fields."""
 
     user_id: str
-    role: ProjectRole = "viewer"
+    role: ProjectRole = "suggester"
 
 
 class MemberCreate(MemberBase):

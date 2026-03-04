@@ -230,11 +230,11 @@ class JoinRequestService:
         jr.responded_at = datetime.now(UTC)
         jr.response_message = action.response_message
 
-        # Add user as editor
+        # Add user as suggester
         member = ProjectMember(
             project_id=project_id,
             user_id=jr.user_id,
-            role="editor",
+            role="suggester",
         )
         self.db.add(member)
 
