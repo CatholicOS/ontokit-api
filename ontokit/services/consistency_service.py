@@ -327,8 +327,9 @@ def _check_dangling_ref(graph: Graph) -> list[ConsistencyIssue]:
     all_subjects = {s for s in graph.subjects(None, None) if isinstance(s, URIRef)}
     known = declared | all_subjects
 
-    # Collect namespace prefixes from the graph and standard vocabularies
-    # so that external/imported vocabulary terms are not flagged as dangling.
+    # Skip well-known vocabulary namespaces and explicitly imported ontologies.
+    # Do NOT skip graph-registered prefixes, as those include the project's own
+    # namespace and would hide dangling references within local terms.
     well_known_ns = {
         str(RDF),
         str(RDFS),
@@ -337,8 +338,16 @@ def _check_dangling_ref(graph: Graph) -> list[ConsistencyIssue]:
         str(SKOS),
         str(DCTERMS),
     }
-    graph_ns = {str(uri) for _prefix, uri in graph.namespace_manager.namespaces()}
-    external_ns = well_known_ns | graph_ns
+    # Derive imported namespaces from owl:imports triples
+    imported_ns = set()
+    for _ontology, _pred, imported in graph.triples((None, OWL.imports, None)):
+        if isinstance(imported, URIRef):
+            imp_str = str(imported)
+            # Ensure namespace ends with separator
+            if not imp_str.endswith(("/", "#")):
+                imp_str += "/"
+            imported_ns.add(imp_str)
+    external_ns = well_known_ns | imported_ns
 
     predicates = [RDFS.subClassOf, RDFS.domain, RDFS.range]
     reported: set[tuple[str, str]] = set()
