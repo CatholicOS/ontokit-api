@@ -47,7 +47,8 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
             await conn.execute(text("SELECT 1"))
         logger.info("Database connection verified")
     except Exception:
-        logger.exception("Failed to connect to the database — continuing startup")
+        logger.exception("Failed to connect to the database")
+        raise
 
     # --- Redis --------------------------------------------------------------
     try:
