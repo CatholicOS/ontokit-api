@@ -542,12 +542,25 @@ class SuggestionService:
             # Refresh so the in-memory object reflects the new status
             await self.db.refresh(session)
 
+            mock_user = CurrentUser(
+                id=session.user_id,
+                email=session.user_email,
+                name=session.user_name,
+            )
+
+            # Verify the user still has project access before auto-submitting
             try:
-                mock_user = CurrentUser(
-                    id=session.user_id,
-                    email=session.user_email,
-                    name=session.user_name,
+                await self._verify_project_access(session.project_id, mock_user)
+            except HTTPException:
+                session.status = SuggestionSessionStatus.DISCARDED.value
+                await self.db.commit()
+                logger.warning(
+                    f"Discarded session {session.session_id}: "
+                    f"user {session.user_id} lost project access"
                 )
+                continue
+
+            try:
                 await self._create_pr_for_session(
                     session.project_id,
                     session,
