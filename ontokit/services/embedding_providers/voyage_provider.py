@@ -55,19 +55,15 @@ class VoyageEmbeddingProvider(EmbeddingProvider):
                     resp.raise_for_status()
                 except httpx.HTTPStatusError as exc:
                     raise ValueError(
-                        f"Voyage API error: {exc.response.status_code} "
-                        f"{exc.response.text}"
+                        f"Voyage API error: {exc.response.status_code} {exc.response.text}"
                     ) from None
                 except httpx.HTTPError as exc:
-                    raise ValueError(
-                        f"Voyage API request failed: {type(exc).__name__}"
-                    ) from None
+                    raise ValueError(f"Voyage API request failed: {type(exc).__name__}") from None
                 data = resp.json()
                 items = data["data"]
                 if len(items) != len(batch):
                     raise ValueError(
-                        f"Voyage API returned {len(items)} embeddings "
-                        f"for {len(batch)} inputs"
+                        f"Voyage API returned {len(items)} embeddings for {len(batch)} inputs"
                     )
                 # Use index field to preserve input ordering
                 batch_result: list[list[float]] = [[] for _ in batch]

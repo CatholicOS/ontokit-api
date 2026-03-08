@@ -50,17 +50,23 @@ def _check_orphan_class(graph: Graph) -> list[ConsistencyIssue]:
     for cls in graph.subjects(RDF.type, OWL.Class):
         if not isinstance(cls, URIRef) or cls == owl_thing:
             continue
-        parents = [p for p in graph.objects(cls, RDFS.subClassOf) if isinstance(p, URIRef) and p != owl_thing]
+        parents = [
+            p
+            for p in graph.objects(cls, RDFS.subClassOf)
+            if isinstance(p, URIRef) and p != owl_thing
+        ]
         children = list(graph.subjects(RDFS.subClassOf, cls))
         instances = list(graph.subjects(RDF.type, cls))
         if not parents and not children and not instances:
-            issues.append(ConsistencyIssue(
-                rule_id="orphan_class",
-                severity="warning",
-                entity_iri=str(cls),
-                entity_type="class",
-                message="Orphan class: no parent, no children, no instances",
-            ))
+            issues.append(
+                ConsistencyIssue(
+                    rule_id="orphan_class",
+                    severity="warning",
+                    entity_iri=str(cls),
+                    entity_type="class",
+                    message="Orphan class: no parent, no children, no instances",
+                )
+            )
     return issues
 
 
@@ -80,13 +86,15 @@ def _check_cycle_detect(graph: Graph) -> list[ConsistencyIssue]:
             if current in visited:
                 iri = str(cls)
                 if iri not in reported:
-                    issues.append(ConsistencyIssue(
-                        rule_id="cycle_detect",
-                        severity="error",
-                        entity_iri=iri,
-                        entity_type="class",
-                        message="Cycle detected in subClassOf hierarchy",
-                    ))
+                    issues.append(
+                        ConsistencyIssue(
+                            rule_id="cycle_detect",
+                            severity="error",
+                            entity_iri=iri,
+                            entity_type="class",
+                            message="Cycle detected in subClassOf hierarchy",
+                        )
+                    )
                     reported.add(iri)
                 break
             visited.add(current)
@@ -104,18 +112,17 @@ def _check_unused_property(graph: Graph) -> list[ConsistencyIssue]:
             if not isinstance(prop, URIRef):
                 continue
             # Check if this property is used as a predicate anywhere
-            used = any(
-                s != prop
-                for s in graph.subjects(prop, None)
-            )
+            used = any(s != prop for s in graph.subjects(prop, None))
             if not used:
-                issues.append(ConsistencyIssue(
-                    rule_id="unused_property",
-                    severity="warning",
-                    entity_iri=str(prop),
-                    entity_type="property",
-                    message="Property is declared but never used as a predicate",
-                ))
+                issues.append(
+                    ConsistencyIssue(
+                        rule_id="unused_property",
+                        severity="warning",
+                        entity_iri=str(prop),
+                        entity_type="property",
+                        message="Property is declared but never used as a predicate",
+                    )
+                )
     return issues
 
 
@@ -130,13 +137,15 @@ def _check_missing_label(graph: Graph) -> list[ConsistencyIssue]:
         if etype == "unknown":
             continue
         if not _has_label(graph, uri):
-            issues.append(ConsistencyIssue(
-                rule_id="missing_label",
-                severity="warning",
-                entity_iri=str(uri),
-                entity_type=etype,
-                message="Entity has no rdfs:label",
-            ))
+            issues.append(
+                ConsistencyIssue(
+                    rule_id="missing_label",
+                    severity="warning",
+                    entity_iri=str(uri),
+                    entity_type=etype,
+                    message="Entity has no rdfs:label",
+                )
+            )
     return issues
 
 
@@ -151,13 +160,15 @@ def _check_missing_comment(graph: Graph) -> list[ConsistencyIssue]:
         if etype == "unknown":
             continue
         if not _has_comment(graph, uri):
-            issues.append(ConsistencyIssue(
-                rule_id="missing_comment",
-                severity="info",
-                entity_iri=str(uri),
-                entity_type=etype,
-                message="Entity has no rdfs:comment",
-            ))
+            issues.append(
+                ConsistencyIssue(
+                    rule_id="missing_comment",
+                    severity="info",
+                    entity_iri=str(uri),
+                    entity_type=etype,
+                    message="Entity has no rdfs:comment",
+                )
+            )
     return issues
 
 
@@ -168,17 +179,23 @@ def _check_orphan_individual(graph: Graph) -> list[ConsistencyIssue]:
     for ind in graph.subjects(RDF.type, OWL.NamedIndividual):
         if not isinstance(ind, URIRef):
             continue
-        types = [t for t in graph.objects(ind, RDF.type) if isinstance(t, URIRef) and t != OWL.NamedIndividual]
+        types = [
+            t
+            for t in graph.objects(ind, RDF.type)
+            if isinstance(t, URIRef) and t != OWL.NamedIndividual
+        ]
         for t in types:
             if t not in declared_classes:
-                issues.append(ConsistencyIssue(
-                    rule_id="orphan_individual",
-                    severity="warning",
-                    entity_iri=str(ind),
-                    entity_type="individual",
-                    message=f"Individual's type {t} is not declared as owl:Class",
-                    details={"undeclared_type": str(t)},
-                ))
+                issues.append(
+                    ConsistencyIssue(
+                        rule_id="orphan_individual",
+                        severity="warning",
+                        entity_iri=str(ind),
+                        entity_type="individual",
+                        message=f"Individual's type {t} is not declared as owl:Class",
+                        details={"undeclared_type": str(t)},
+                    )
+                )
     return issues
 
 
@@ -191,13 +208,15 @@ def _check_empty_domain(graph: Graph) -> list[ConsistencyIssue]:
                 continue
             domains = list(graph.objects(prop, RDFS.domain))
             if not domains:
-                issues.append(ConsistencyIssue(
-                    rule_id="empty_domain",
-                    severity="info",
-                    entity_iri=str(prop),
-                    entity_type="property",
-                    message="Property has no rdfs:domain",
-                ))
+                issues.append(
+                    ConsistencyIssue(
+                        rule_id="empty_domain",
+                        severity="info",
+                        entity_iri=str(prop),
+                        entity_type="property",
+                        message="Property has no rdfs:domain",
+                    )
+                )
     return issues
 
 
@@ -210,13 +229,15 @@ def _check_empty_range(graph: Graph) -> list[ConsistencyIssue]:
                 continue
             ranges = list(graph.objects(prop, RDFS.range))
             if not ranges:
-                issues.append(ConsistencyIssue(
-                    rule_id="empty_range",
-                    severity="info",
-                    entity_iri=str(prop),
-                    entity_type="property",
-                    message="Property has no rdfs:range",
-                ))
+                issues.append(
+                    ConsistencyIssue(
+                        rule_id="empty_range",
+                        severity="info",
+                        entity_iri=str(prop),
+                        entity_type="property",
+                        message="Property has no rdfs:range",
+                    )
+                )
     return issues
 
 
@@ -247,14 +268,16 @@ def _check_duplicate_label(graph: Graph) -> list[ConsistencyIssue]:
                 continue
             reported.add(iri)
             lang_str = f"@{lang}" if lang else ""
-            issues.append(ConsistencyIssue(
-                rule_id="duplicate_label",
-                severity="warning",
-                entity_iri=iri,
-                entity_type=etype,
-                message=f'Duplicate label "{label_val}"{lang_str} shared with {len(iris) - 1} other {etype}(s)',
-                details={"duplicates": [i for i in iris if i != iri]},
-            ))
+            issues.append(
+                ConsistencyIssue(
+                    rule_id="duplicate_label",
+                    severity="warning",
+                    entity_iri=iri,
+                    entity_type=etype,
+                    message=f'Duplicate label "{label_val}"{lang_str} shared with {len(iris) - 1} other {etype}(s)',
+                    details={"duplicates": [i for i in iris if i != iri]},
+                )
+            )
     return issues
 
 
@@ -266,14 +289,16 @@ def _check_deprecated_parent(graph: Graph) -> list[ConsistencyIssue]:
             continue
         for parent in graph.objects(cls, RDFS.subClassOf):
             if isinstance(parent, URIRef) and _is_deprecated(graph, parent):
-                issues.append(ConsistencyIssue(
-                    rule_id="deprecated_parent",
-                    severity="warning",
-                    entity_iri=str(cls),
-                    entity_type="class",
-                    message=f"Parent class {parent} is deprecated",
-                    details={"deprecated_parent": str(parent)},
-                ))
+                issues.append(
+                    ConsistencyIssue(
+                        rule_id="deprecated_parent",
+                        severity="warning",
+                        entity_iri=str(cls),
+                        entity_type="class",
+                        message=f"Parent class {parent} is deprecated",
+                        details={"deprecated_parent": str(parent)},
+                    )
+                )
     return issues
 
 
@@ -288,7 +313,12 @@ def _check_dangling_ref(graph: Graph) -> list[ConsistencyIssue]:
     # Collect namespace prefixes from the graph and standard vocabularies
     # so that external/imported vocabulary terms are not flagged as dangling.
     well_known_ns = {
-        str(RDF), str(RDFS), str(OWL), str(XSD), str(SKOS), str(DCTERMS),
+        str(RDF),
+        str(RDFS),
+        str(OWL),
+        str(XSD),
+        str(SKOS),
+        str(DCTERMS),
     }
     graph_ns = {str(uri) for _prefix, uri in graph.namespace_manager.namespaces()}
     external_ns = well_known_ns | graph_ns
@@ -313,14 +343,18 @@ def _check_dangling_ref(graph: Graph) -> list[ConsistencyIssue]:
                 continue
             reported.add(key)
             if isinstance(s, URIRef):
-                issues.append(ConsistencyIssue(
-                    rule_id="dangling_ref",
-                    severity="error",
-                    entity_iri=str(s),
-                    entity_type=_get_entity_type(graph, s) if isinstance(s, URIRef) else "unknown",
-                    message=f"References undeclared entity {o}",
-                    details={"predicate": str(pred), "dangling_target": str(o)},
-                ))
+                issues.append(
+                    ConsistencyIssue(
+                        rule_id="dangling_ref",
+                        severity="error",
+                        entity_iri=str(s),
+                        entity_type=_get_entity_type(graph, s)
+                        if isinstance(s, URIRef)
+                        else "unknown",
+                        message=f"References undeclared entity {o}",
+                        details={"predicate": str(pred), "dangling_target": str(o)},
+                    )
+                )
     return issues
 
 
@@ -331,19 +365,25 @@ def _check_multi_root(graph: Graph) -> list[ConsistencyIssue]:
     for cls in graph.subjects(RDF.type, OWL.Class):
         if not isinstance(cls, URIRef) or cls == owl_thing:
             continue
-        parents = [p for p in graph.objects(cls, RDFS.subClassOf) if isinstance(p, URIRef) and p != owl_thing]
+        parents = [
+            p
+            for p in graph.objects(cls, RDFS.subClassOf)
+            if isinstance(p, URIRef) and p != owl_thing
+        ]
         if not parents:
             root_iris.append(str(cls))
 
     if len(root_iris) > 5:
-        return [ConsistencyIssue(
-            rule_id="multi_root",
-            severity="info",
-            entity_iri="",
-            entity_type="ontology",
-            message=f"Ontology has {len(root_iris)} root classes (classes with no parent)",
-            details={"root_count": len(root_iris), "root_iris": root_iris[:20]},
-        )]
+        return [
+            ConsistencyIssue(
+                rule_id="multi_root",
+                severity="info",
+                entity_iri="",
+                entity_type="ontology",
+                message=f"Ontology has {len(root_iris)} root classes (classes with no parent)",
+                details={"root_count": len(root_iris), "root_iris": root_iris[:20]},
+            )
+        ]
     return []
 
 

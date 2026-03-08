@@ -36,9 +36,7 @@ class SuggestionSaveResponse(BaseModel):
 class SuggestionSubmitRequest(BaseModel):
     """Request body for submitting a suggestion session as a PR."""
 
-    summary: str | None = Field(
-        default=None, description="Optional summary describing the changes"
-    )
+    summary: str | None = Field(default=None, description="Optional summary describing the changes")
 
 
 class SuggestionSubmitResponse(BaseModel):

@@ -1274,8 +1274,13 @@ async def save_source_content(
 
         change_service = ChangeEventService(db)
         change_events = await change_service.record_events_from_diff(
-            project_id, current_branch, old_graph, new_graph,
-            user.id, user.name, commit_info.hash,
+            project_id,
+            current_branch,
+            old_graph,
+            new_graph,
+            user.id,
+            user.name,
+            commit_info.hash,
         )
     except Exception:
         import logging
@@ -1297,7 +1302,9 @@ async def save_source_content(
                     if event.event_type != ChangeEventType.DELETE:
                         await pool.enqueue_job(
                             "run_single_entity_embed_task",
-                            str(project_id), current_branch, event.entity_iri,
+                            str(project_id),
+                            current_branch,
+                            event.entity_iri,
                         )
         except Exception:
             import logging

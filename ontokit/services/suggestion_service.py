@@ -50,9 +50,7 @@ class SuggestionService:
     async def _get_project(self, project_id: UUID) -> Project:
         """Get a project by ID with members loaded, or raise 404."""
         result = await self.db.execute(
-            select(Project)
-            .options(selectinload(Project.members))
-            .where(Project.id == project_id)
+            select(Project).options(selectinload(Project.members)).where(Project.id == project_id)
         )
         project = result.scalar_one_or_none()
         if project is None:
@@ -91,9 +89,7 @@ class SuggestionService:
             return os.path.basename(project.source_file_path)
         return "ontology.ttl"
 
-    async def _get_session(
-        self, project_id: UUID, session_id: str
-    ) -> SuggestionSession:
+    async def _get_session(self, project_id: UUID, session_id: str) -> SuggestionSession:
         """Get a suggestion session or raise 404."""
         result = await self.db.execute(
             select(SuggestionSession).where(
@@ -126,9 +122,7 @@ class SuggestionService:
         except (json.JSONDecodeError, TypeError):
             return []
 
-    def _update_entities_modified(
-        self, session: SuggestionSession, label: str
-    ) -> None:
+    def _update_entities_modified(self, session: SuggestionSession, label: str) -> None:
         """Add a label to the entities_modified list (deduplicated)."""
         entities = self._parse_entities_modified(session)
         if label not in entities:
@@ -308,9 +302,7 @@ class SuggestionService:
         body_parts.append(f"\n**Entities modified** ({session.changes_count} changes):")
         for entity in entities:
             body_parts.append(f"- {entity}")
-        body_parts.append(
-            f"\n*Submitted by {session.user_name or session.user_id}*"
-        )
+        body_parts.append(f"\n*Submitted by {session.user_name or session.user_id}*")
         description = "\n".join(body_parts)
 
         # Get default branch
@@ -326,16 +318,12 @@ class SuggestionService:
         )
 
         try:
-            pr_response = await pr_service.create_pull_request(
-                project_id, pr_create, user
-            )
+            pr_response = await pr_service.create_pull_request(project_id, pr_create, user)
         except HTTPException as e:
             # If the user doesn't have editor role for PR creation,
             # fall back to creating the PR directly
             if e.status_code == status.HTTP_403_FORBIDDEN:
-                pr_response = await self._create_pr_directly(
-                    project_id, pr_create, session
-                )
+                pr_response = await self._create_pr_directly(project_id, pr_create, session)
             else:
                 raise
 
@@ -442,9 +430,7 @@ class SuggestionService:
 
         return SuggestionSessionListResponse(items=items)
 
-    async def discard(
-        self, project_id: UUID, session_id: str, user: CurrentUser
-    ) -> None:
+    async def discard(self, project_id: UUID, session_id: str, user: CurrentUser) -> None:
         """Discard a suggestion session and delete its branch."""
         session = await self._get_session(project_id, session_id)
         self._verify_ownership(session, user)
@@ -579,9 +565,7 @@ class SuggestionService:
                 await self.db.rollback()
                 session.status = SuggestionSessionStatus.ACTIVE.value
                 await self.db.commit()
-                logger.error(
-                    f"Failed to auto-submit session {session.session_id}: {e}"
-                )
+                logger.error(f"Failed to auto-submit session {session.session_id}: {e}")
 
         return count
 

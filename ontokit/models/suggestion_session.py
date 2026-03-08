@@ -44,9 +44,7 @@ class SuggestionSession(Base):
     branch: Mapped[str] = mapped_column(String(255), nullable=False)
 
     # Status and progress
-    status: Mapped[str] = mapped_column(
-        String(50), default=SuggestionSessionStatus.ACTIVE.value
-    )
+    status: Mapped[str] = mapped_column(String(50), default=SuggestionSessionStatus.ACTIVE.value)
     changes_count: Mapped[int] = mapped_column(Integer, default=0)
     entities_modified: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -63,17 +61,13 @@ class SuggestionSession(Base):
     last_activity: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     project: Mapped["Project"] = relationship()
     pull_request: Mapped["PullRequest | None"] = relationship()
 
-    __table_args__ = (
-        UniqueConstraint("project_id", "session_id", name="uq_suggestion_session"),
-    )
+    __table_args__ = (UniqueConstraint("project_id", "session_id", name="uq_suggestion_session"),)
 
     def __repr__(self) -> str:
         return (

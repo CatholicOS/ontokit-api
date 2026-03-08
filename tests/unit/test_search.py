@@ -184,15 +184,11 @@ async def test_execute_sparql_empty_graph() -> None:
 
 
 async def test_execute_sparql_invalid_query() -> None:
-    """An invalid SPARQL query returns an empty response rather than raising."""
+    """An invalid SPARQL query raises ValueError during query type detection."""
     svc = SearchService()
     sparql = SPARQLQuery(
         query="THIS IS NOT VALID SPARQL AT ALL !!!",
     )
 
-    resp = await svc.execute_sparql(sparql, graph=Graph())
-
-    # The service catches exceptions and returns empty
-    assert resp.variables == []
-    assert resp.bindings == []
-    assert resp.took_ms >= 0
+    with pytest.raises(ValueError, match="Invalid SPARQL query"):
+        await svc.execute_sparql(sparql, graph=Graph())

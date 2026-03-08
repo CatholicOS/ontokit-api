@@ -37,9 +37,7 @@ class EntityChangeEvent(Base):
     changed_fields: Mapped[list] = mapped_column(JSON, default=list)
     old_values: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     new_values: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     project: Mapped["Project"] = relationship()  # type: ignore[name-defined]  # noqa: F821
 

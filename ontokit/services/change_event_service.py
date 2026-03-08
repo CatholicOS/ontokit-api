@@ -117,17 +117,33 @@ class ChangeEventService:
 
         # Created entities
         for iri in new_iris - old_iris:
-            events.append(await self.record_event(
-                project_id, branch, iri, new_entities[iri],
-                ChangeEventType.CREATE, user_id, user_name, commit_hash,
-            ))
+            events.append(
+                await self.record_event(
+                    project_id,
+                    branch,
+                    iri,
+                    new_entities[iri],
+                    ChangeEventType.CREATE,
+                    user_id,
+                    user_name,
+                    commit_hash,
+                )
+            )
 
         # Deleted entities
         for iri in old_iris - new_iris:
-            events.append(await self.record_event(
-                project_id, branch, iri, old_entities[iri],
-                ChangeEventType.DELETE, user_id, user_name, commit_hash,
-            ))
+            events.append(
+                await self.record_event(
+                    project_id,
+                    branch,
+                    iri,
+                    old_entities[iri],
+                    ChangeEventType.DELETE,
+                    user_id,
+                    user_name,
+                    commit_hash,
+                )
+            )
 
         # Modified entities
         for iri in old_iris & new_iris:
@@ -162,8 +178,14 @@ class ChangeEventService:
                 new_vals["deprecated"] = new_dep
 
             # Check comments
-            old_comments = [str(o) for o in old_graph.objects(uri, RDFS.comment) if isinstance(o, RDFLiteral)] if old_graph else []
-            new_comments = [str(o) for o in new_graph.objects(uri, RDFS.comment) if isinstance(o, RDFLiteral)]
+            old_comments = (
+                [str(o) for o in old_graph.objects(uri, RDFS.comment) if isinstance(o, RDFLiteral)]
+                if old_graph
+                else []
+            )
+            new_comments = [
+                str(o) for o in new_graph.objects(uri, RDFS.comment) if isinstance(o, RDFLiteral)
+            ]
             if sorted(old_comments) != sorted(new_comments):
                 changed_fields.append("comments")
 
@@ -187,11 +209,21 @@ class ChangeEventService:
             else:
                 event_type = ChangeEventType.UPDATE
 
-            events.append(await self.record_event(
-                project_id, branch, iri, etype,
-                event_type, user_id, user_name, commit_hash,
-                changed_fields, old_vals or None, new_vals or None,
-            ))
+            events.append(
+                await self.record_event(
+                    project_id,
+                    branch,
+                    iri,
+                    etype,
+                    event_type,
+                    user_id,
+                    user_name,
+                    commit_hash,
+                    changed_fields,
+                    old_vals or None,
+                    new_vals or None,
+                )
+            )
 
         if events:
             await self._db.commit()
@@ -278,8 +310,7 @@ class ChangeEventService:
         )
         daily_result = await self._db.execute(daily_q)
         daily_counts = [
-            ActivityDay(date=row.day.strftime("%Y-%m-%d"), count=row.cnt)
-            for row in daily_result
+            ActivityDay(date=row.day.strftime("%Y-%m-%d"), count=row.cnt) for row in daily_result
         ]
 
         # Total
@@ -365,7 +396,11 @@ class ChangeEventService:
                 EntityChangeEvent.user_id,
                 EntityChangeEvent.user_name,
                 func.count().filter(EntityChangeEvent.event_type == "create").label("create_count"),
-                func.count().filter(EntityChangeEvent.event_type.in_(["update", "rename", "reparent", "deprecate"])).label("update_count"),
+                func.count()
+                .filter(
+                    EntityChangeEvent.event_type.in_(["update", "rename", "reparent", "deprecate"])
+                )
+                .label("update_count"),
                 func.count().filter(EntityChangeEvent.event_type == "delete").label("delete_count"),
                 func.count().label("total_count"),
                 func.max(EntityChangeEvent.created_at).label("last_active_at"),

@@ -18,8 +18,12 @@ def build_embedding_text(graph: Graph, entity_uri: URIRef, entity_type: str) -> 
     parts.append(f"{entity_type}: {primary_label}")
 
     # Comments/definitions
-    comments = [str(o) for o in graph.objects(entity_uri, RDFS.comment) if isinstance(o, RDFLiteral)]
-    definitions = [str(o) for o in graph.objects(entity_uri, SKOS.definition) if isinstance(o, RDFLiteral)]
+    comments = [
+        str(o) for o in graph.objects(entity_uri, RDFS.comment) if isinstance(o, RDFLiteral)
+    ]
+    definitions = [
+        str(o) for o in graph.objects(entity_uri, SKOS.definition) if isinstance(o, RDFLiteral)
+    ]
     desc = comments or definitions
     if desc:
         parts.append(desc[0])
@@ -37,7 +41,9 @@ def build_embedding_text(graph: Graph, entity_uri: URIRef, entity_type: str) -> 
         parts.append(f"Parents: {', '.join(parent_labels)}")
 
     # Alternative labels
-    alt_labels = [str(o) for o in graph.objects(entity_uri, SKOS.altLabel) if isinstance(o, RDFLiteral)]
+    alt_labels = [
+        str(o) for o in graph.objects(entity_uri, SKOS.altLabel) if isinstance(o, RDFLiteral)
+    ]
     extra_labels = [lbl for lbl in labels[1:] if lbl != primary_label]
     all_alt = alt_labels + extra_labels
     if all_alt:

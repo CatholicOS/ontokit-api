@@ -74,9 +74,7 @@ class EmbeddingService:
 
     async def get_config(self, project_id: UUID) -> EmbeddingConfig | None:
         result = await self._db.execute(
-            select(ProjectEmbeddingConfig).where(
-                ProjectEmbeddingConfig.project_id == project_id
-            )
+            select(ProjectEmbeddingConfig).where(ProjectEmbeddingConfig.project_id == project_id)
         )
         config = result.scalar_one_or_none()
         if not config:
@@ -87,16 +85,16 @@ class EmbeddingService:
             api_key_set=config.api_key_encrypted is not None,
             dimensions=config.dimensions,
             auto_embed_on_save=config.auto_embed_on_save,
-            last_full_embed_at=config.last_full_embed_at.isoformat() if config.last_full_embed_at else None,
+            last_full_embed_at=config.last_full_embed_at.isoformat()
+            if config.last_full_embed_at
+            else None,
         )
 
     async def update_config(
         self, project_id: UUID, update: EmbeddingConfigUpdate
     ) -> EmbeddingConfig:
         result = await self._db.execute(
-            select(ProjectEmbeddingConfig).where(
-                ProjectEmbeddingConfig.project_id == project_id
-            )
+            select(ProjectEmbeddingConfig).where(ProjectEmbeddingConfig.project_id == project_id)
         )
         config = result.scalar_one_or_none()
 
@@ -113,16 +111,12 @@ class EmbeddingService:
             model_changed = True
         if model_changed:
             # Update dimensions based on new provider/model
-            provider = get_embedding_provider(
-                config.provider, config.model_name, None
-            )
+            provider = get_embedding_provider(config.provider, config.model_name, None)
             config.dimensions = provider.dimensions
             # Invalidate stale embeddings and reset full-embed marker
             config.last_full_embed_at = None
             await self._db.execute(
-                delete(EntityEmbedding).where(
-                    EntityEmbedding.project_id == project_id
-                )
+                delete(EntityEmbedding).where(EntityEmbedding.project_id == project_id)
             )
         if update.api_key is not None:
             config.api_key_encrypted = _encrypt_secret(update.api_key)
@@ -138,14 +132,14 @@ class EmbeddingService:
             api_key_set=config.api_key_encrypted is not None,
             dimensions=config.dimensions,
             auto_embed_on_save=config.auto_embed_on_save,
-            last_full_embed_at=config.last_full_embed_at.isoformat() if config.last_full_embed_at else None,
+            last_full_embed_at=config.last_full_embed_at.isoformat()
+            if config.last_full_embed_at
+            else None,
         )
 
     async def get_status(self, project_id: UUID, branch: str) -> EmbeddingStatus:
         config = await self._db.execute(
-            select(ProjectEmbeddingConfig).where(
-                ProjectEmbeddingConfig.project_id == project_id
-            )
+            select(ProjectEmbeddingConfig).where(ProjectEmbeddingConfig.project_id == project_id)
         )
         cfg = config.scalar_one_or_none()
 
@@ -180,9 +174,7 @@ class EmbeddingService:
         job_in_progress = active_job is not None
         job_progress = None
         if active_job and active_job.total_entities > 0:
-            job_progress = round(
-                active_job.embedded_entities / active_job.total_entities * 100, 1
-            )
+            job_progress = round(active_job.embedded_entities / active_job.total_entities * 100, 1)
             total_entities = max(total_entities, active_job.total_entities)
 
         coverage = round(embedded_count / total_entities * 100, 1) if total_entities > 0 else 0.0
@@ -195,21 +187,19 @@ class EmbeddingService:
             model_name=cfg.model_name if cfg else "all-MiniLM-L6-v2",
             job_in_progress=job_in_progress,
             job_progress_percent=job_progress,
-            last_full_embed_at=cfg.last_full_embed_at.isoformat() if cfg and cfg.last_full_embed_at else None,
+            last_full_embed_at=cfg.last_full_embed_at.isoformat()
+            if cfg and cfg.last_full_embed_at
+            else None,
         )
 
     async def clear_embeddings(self, project_id: UUID) -> None:
         await self._db.execute(
             delete(EntityEmbedding).where(EntityEmbedding.project_id == project_id)
         )
-        await self._db.execute(
-            delete(EmbeddingJob).where(EmbeddingJob.project_id == project_id)
-        )
+        await self._db.execute(delete(EmbeddingJob).where(EmbeddingJob.project_id == project_id))
         # Reset last_full_embed_at
         result = await self._db.execute(
-            select(ProjectEmbeddingConfig).where(
-                ProjectEmbeddingConfig.project_id == project_id
-            )
+            select(ProjectEmbeddingConfig).where(ProjectEmbeddingConfig.project_id == project_id)
         )
         cfg = result.scalar_one_or_none()
         if cfg:
@@ -219,9 +209,7 @@ class EmbeddingService:
     async def _get_provider(self, project_id: UUID):
         """Get the embedding provider for a project."""
         result = await self._db.execute(
-            select(ProjectEmbeddingConfig).where(
-                ProjectEmbeddingConfig.project_id == project_id
-            )
+            select(ProjectEmbeddingConfig).where(ProjectEmbeddingConfig.project_id == project_id)
         )
         cfg = result.scalar_one_or_none()
 
@@ -233,14 +221,10 @@ class EmbeddingService:
 
         return get_embedding_provider(provider_name, model_name, api_key)
 
-    async def embed_project(
-        self, project_id: UUID, branch: str, job_id: UUID
-    ) -> None:
+    async def embed_project(self, project_id: UUID, branch: str, job_id: UUID) -> None:
         """Full project embedding (called from ARQ worker)."""
         # Get or create job
-        result = await self._db.execute(
-            select(EmbeddingJob).where(EmbeddingJob.id == job_id)
-        )
+        result = await self._db.execute(select(EmbeddingJob).where(EmbeddingJob.id == job_id))
         job = result.scalar_one_or_none()
         if not job:
             job = EmbeddingJob(
@@ -261,9 +245,7 @@ class EmbeddingService:
             from ontokit.services.ontology import get_ontology_service
             from ontokit.services.storage import get_storage_service
 
-            proj_result = await self._db.execute(
-                select(Project).where(Project.id == project_id)
-            )
+            proj_result = await self._db.execute(select(Project).where(Project.id == project_id))
             project = proj_result.scalar_one_or_none()
             if not project or not project.source_file_path:
                 raise ValueError("Project not found or has no ontology file")
@@ -313,7 +295,11 @@ class EmbeddingService:
                 for (uri, etype, embed_text), embedding in zip(batch, embeddings, strict=True):
                     iri = str(uri)
                     label = next(
-                        (str(o) for o in graph.objects(uri, RDFS.label) if isinstance(o, RDFLiteral)),
+                        (
+                            str(o)
+                            for o in graph.objects(uri, RDFS.label)
+                            if isinstance(o, RDFLiteral)
+                        ),
                         None,
                     )
                     deprecated = _is_deprecated(graph, uri)
@@ -335,18 +321,20 @@ class EmbeddingService:
                         existing.provider = provider.provider_name
                         existing.model_name = provider.model_id
                     else:
-                        self._db.add(EntityEmbedding(
-                            project_id=project_id,
-                            branch=branch,
-                            entity_iri=iri,
-                            entity_type=etype,
-                            label=label,
-                            embedding_text=embed_text,
-                            embedding=embedding,
-                            provider=provider.provider_name,
-                            model_name=provider.model_id,
-                            deprecated=deprecated,
-                        ))
+                        self._db.add(
+                            EntityEmbedding(
+                                project_id=project_id,
+                                branch=branch,
+                                entity_iri=iri,
+                                entity_type=etype,
+                                label=label,
+                                embedding_text=embed_text,
+                                embedding=embedding,
+                                provider=provider.provider_name,
+                                model_name=provider.model_id,
+                                deprecated=deprecated,
+                            )
+                        )
 
                 job.embedded_entities = min(i + batch_size, len(entities))
                 await self._db.commit()
@@ -394,9 +382,7 @@ class EmbeddingService:
             await self._db.commit()
             raise
 
-    async def embed_single_entity(
-        self, project_id: UUID, branch: str, entity_iri: str
-    ) -> None:
+    async def embed_single_entity(self, project_id: UUID, branch: str, entity_iri: str) -> None:
         """Re-embed one entity (for auto_embed_on_save)."""
         from ontokit.services.ontology import get_ontology_service
 
@@ -438,18 +424,20 @@ class EmbeddingService:
             existing.provider = provider.provider_name
             existing.model_name = provider.model_id
         else:
-            self._db.add(EntityEmbedding(
-                project_id=project_id,
-                branch=branch,
-                entity_iri=entity_iri,
-                entity_type=etype,
-                label=label,
-                embedding_text=embed_text,
-                embedding=embedding,
-                provider=provider.provider_name,
-                model_name=provider.model_id,
-                deprecated=deprecated,
-            ))
+            self._db.add(
+                EntityEmbedding(
+                    project_id=project_id,
+                    branch=branch,
+                    entity_iri=entity_iri,
+                    entity_type=etype,
+                    label=label,
+                    embedding_text=embed_text,
+                    embedding=embedding,
+                    provider=provider.provider_name,
+                    model_name=provider.model_id,
+                    deprecated=deprecated,
+                )
+            )
 
         await self._db.commit()
 
@@ -503,13 +491,15 @@ class EmbeddingService:
         results = []
         for row in result:
             if row.score >= threshold:
-                results.append(SemanticSearchResult(
-                    iri=row.entity_iri,
-                    label=row.label or "",
-                    entity_type=row.entity_type,
-                    score=round(row.score, 4),
-                    deprecated=row.deprecated,
-                ))
+                results.append(
+                    SemanticSearchResult(
+                        iri=row.entity_iri,
+                        label=row.label or "",
+                        entity_type=row.entity_type,
+                        score=round(row.score, 4),
+                        deprecated=row.deprecated,
+                    )
+                )
 
         return SemanticSearchResponse(results=results, search_mode="semantic")
 
@@ -556,13 +546,15 @@ class EmbeddingService:
         results = []
         for row in result:
             if row.score >= threshold:
-                results.append(SimilarEntity(
-                    iri=row.entity_iri,
-                    label=row.label or "",
-                    entity_type=row.entity_type,
-                    score=round(row.score, 4),
-                    deprecated=row.deprecated,
-                ))
+                results.append(
+                    SimilarEntity(
+                        iri=row.entity_iri,
+                        label=row.label or "",
+                        entity_type=row.entity_type,
+                        score=round(row.score, 4),
+                        deprecated=row.deprecated,
+                    )
+                )
 
         return results
 
@@ -586,13 +578,10 @@ class EmbeddingService:
             return []
 
         # Get candidate embeddings
-        candidates_q = (
-            select(EntityEmbedding)
-            .where(
-                EntityEmbedding.project_id == project_id,
-                EntityEmbedding.branch == body.branch,
-                EntityEmbedding.entity_iri.in_(body.candidates),
-            )
+        candidates_q = select(EntityEmbedding).where(
+            EntityEmbedding.project_id == project_id,
+            EntityEmbedding.branch == body.branch,
+            EntityEmbedding.entity_iri.in_(body.candidates),
         )
         cand_result = await self._db.execute(candidates_q)
         candidates = cand_result.scalars().all()
@@ -612,11 +601,13 @@ class EmbeddingService:
             if cand_norm == 0:
                 continue
             sim = float(np.dot(ctx_vec, cand_vec) / (ctx_norm * cand_norm))
-            ranked.append(RankedCandidate(
-                iri=cand.entity_iri,
-                label=cand.label or "",
-                score=round(sim, 4),
-            ))
+            ranked.append(
+                RankedCandidate(
+                    iri=cand.entity_iri,
+                    label=cand.label or "",
+                    score=round(sim, 4),
+                )
+            )
 
         ranked.sort(key=lambda x: x.score, reverse=True)
         return ranked

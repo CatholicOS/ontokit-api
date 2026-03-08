@@ -104,13 +104,15 @@ def find_duplicates(graph: Graph, threshold: float = 0.85) -> DuplicateDetection
                     sims.append(sim)
         avg_sim = sum(sims) / len(sims) if sims else threshold
 
-        clusters.append(DuplicateCluster(
-            entities=[
-                DuplicateEntity(iri=iri, label=label, entity_type=etype)
-                for iri, label, etype in members
-            ],
-            similarity=round(avg_sim, 3),
-        ))
+        clusters.append(
+            DuplicateCluster(
+                entities=[
+                    DuplicateEntity(iri=iri, label=label, entity_type=etype)
+                    for iri, label, etype in members
+                ],
+                similarity=round(avg_sim, 3),
+            )
+        )
 
     return DuplicateDetectionResult(
         clusters=clusters,

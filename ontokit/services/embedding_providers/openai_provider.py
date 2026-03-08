@@ -53,13 +53,10 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
                     resp.raise_for_status()
                 except httpx.HTTPStatusError as exc:
                     raise ValueError(
-                        f"OpenAI API error: {exc.response.status_code} "
-                        f"{exc.response.text}"
+                        f"OpenAI API error: {exc.response.status_code} {exc.response.text}"
                     ) from None
                 except httpx.HTTPError as exc:
-                    raise ValueError(
-                        f"OpenAI API request failed: {type(exc).__name__}"
-                    ) from None
+                    raise ValueError(f"OpenAI API request failed: {type(exc).__name__}") from None
                 data = resp.json()
                 # Sort by index to preserve order
                 sorted_data = sorted(data["data"], key=lambda x: x["index"])
