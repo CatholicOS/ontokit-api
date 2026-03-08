@@ -75,6 +75,16 @@ class SuggestionService:
             return True
         return role in ("owner", "admin", "editor", "suggester")
 
+    async def _verify_project_access(self, project_id: UUID, user: CurrentUser) -> None:
+        """Verify the user still has suggest permissions on the project."""
+        project = await self._get_project(project_id)
+        role = self._get_user_role(project, user)
+        if not self._can_suggest(role, user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You no longer have permission to suggest changes",
+            )
+
     def _get_git_ontology_path(self, project: Project) -> str:
         """Get the ontology file path within the git repo."""
         if project.source_file_path:
@@ -204,6 +214,7 @@ class SuggestionService:
         """Save content to the suggestion branch."""
         session = await self._get_session(project_id, session_id)
         self._verify_ownership(session, user)
+        await self._verify_project_access(project_id, user)
 
         if session.status != SuggestionSessionStatus.ACTIVE.value:
             raise HTTPException(
@@ -255,6 +266,7 @@ class SuggestionService:
         """Submit the suggestion session by creating a PR."""
         session = await self._get_session(project_id, session_id)
         self._verify_ownership(session, user)
+        await self._verify_project_access(project_id, user)
 
         if session.status != SuggestionSessionStatus.ACTIVE.value:
             raise HTTPException(
@@ -476,6 +488,14 @@ class SuggestionService:
 
         if session.status != SuggestionSessionStatus.ACTIVE.value:
             return  # Silently ignore saves to non-active sessions
+
+        # Re-check project access with the session owner's identity
+        session_user = CurrentUser(
+            id=session.user_id,
+            email=session.user_email,
+            name=session.user_name,
+        )
+        await self._verify_project_access(project_id, session_user)
 
         project = await self._get_project(project_id)
         filename = self._get_git_ontology_path(project)
