@@ -9,6 +9,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -350,30 +351,41 @@ class SuggestionService:
 
         from ontokit.models.pull_request import PRStatus, PullRequest
 
-        max_number_result = await self.db.execute(
-            select(sa_func.max(PullRequest.pr_number)).where(
-                PullRequest.project_id == project_id
+        max_retries = 3
+        for attempt in range(max_retries):
+            max_number_result = await self.db.execute(
+                select(sa_func.max(PullRequest.pr_number)).where(
+                    PullRequest.project_id == project_id
+                )
             )
-        )
-        max_number = max_number_result.scalar() or 0
-        pr_number = max_number + 1
+            max_number = max_number_result.scalar() or 0
+            pr_number = max_number + 1
 
-        db_pr = PullRequest(
-            project_id=project_id,
-            pr_number=pr_number,
-            title=pr_create.title,
-            description=pr_create.description,
-            source_branch=pr_create.source_branch,
-            target_branch=pr_create.target_branch,
-            author_id=session.user_id,
-            author_name=session.user_name,
-            author_email=session.user_email,
-            status=PRStatus.OPEN.value,
-        )
-        self.db.add(db_pr)
-        await self.db.flush()
-        await self.db.refresh(db_pr)
-        return db_pr
+            db_pr = PullRequest(
+                project_id=project_id,
+                pr_number=pr_number,
+                title=pr_create.title,
+                description=pr_create.description,
+                source_branch=pr_create.source_branch,
+                target_branch=pr_create.target_branch,
+                author_id=session.user_id,
+                author_name=session.user_name,
+                author_email=session.user_email,
+                status=PRStatus.OPEN.value,
+            )
+            self.db.add(db_pr)
+            try:
+                await self.db.flush()
+            except IntegrityError:
+                await self.db.rollback()
+                if attempt == max_retries - 1:
+                    raise
+                continue
+            await self.db.refresh(db_pr)
+            return db_pr
+
+        # Unreachable, but satisfies type checker
+        raise RuntimeError("Failed to allocate PR number")
 
     async def list_sessions(
         self, project_id: UUID, user: CurrentUser
