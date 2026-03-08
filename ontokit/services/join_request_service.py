@@ -202,7 +202,7 @@ class JoinRequestService:
         action: JoinRequestAction,
         user: CurrentUser,
     ) -> JoinRequestResponse:
-        """Approve a join request and add the user as an editor."""
+        """Approve a join request and add the user with the suggester role."""
         await self._check_admin_access(project_id, user)
 
         result = await self.db.execute(
