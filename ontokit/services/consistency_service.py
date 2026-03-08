@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from rdflib import Graph, URIRef
 from rdflib import Literal as RDFLiteral
-from rdflib.namespace import OWL, RDF, RDFS
+from rdflib.namespace import DCTERMS, OWL, RDF, RDFS, SKOS, XSD
 
 from ontokit.schemas.quality import ConsistencyCheckResult, ConsistencyIssue
 
@@ -287,6 +287,14 @@ def _check_dangling_ref(graph: Graph) -> list[ConsistencyIssue]:
     all_subjects = {s for s in graph.subjects(None, None) if isinstance(s, URIRef)}
     known = declared | all_subjects
 
+    # Collect namespace prefixes from the graph and standard vocabularies
+    # so that external/imported vocabulary terms are not flagged as dangling.
+    well_known_ns = {
+        str(RDF), str(RDFS), str(OWL), str(XSD), str(SKOS), str(DCTERMS),
+    }
+    graph_ns = {str(uri) for _prefix, uri in graph.namespace_manager.namespaces()}
+    external_ns = well_known_ns | graph_ns
+
     predicates = [RDFS.subClassOf, RDFS.domain, RDFS.range]
     reported: set[tuple[str, str]] = set()
 
@@ -297,6 +305,10 @@ def _check_dangling_ref(graph: Graph) -> list[ConsistencyIssue]:
             if o == OWL.Thing:
                 continue
             if o in known:
+                continue
+            # Skip URIs whose namespace matches a registered or well-known vocab
+            o_str = str(o)
+            if any(o_str.startswith(ns) for ns in external_ns):
                 continue
             key = (str(s), str(o))
             if key in reported:
