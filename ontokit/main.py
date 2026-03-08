@@ -163,7 +163,12 @@ async def forbidden_handler(_request: Request, exc: ForbiddenError) -> JSONRespo
 
 @app.exception_handler(RateLimitExceeded)
 async def rate_limit_handler(_request: Request, exc: RateLimitExceeded) -> JSONResponse:
-    return _error_response(429, "rate_limit_exceeded", str(exc.detail))
+    response = _error_response(429, "rate_limit_exceeded", str(exc.detail))
+    if exc.limit and hasattr(exc.limit, "limit"):
+        retry_after = exc.limit.limit.get_expiry()
+        response.headers["Retry-After"] = str(retry_after)
+        response.headers["X-RateLimit-Limit"] = str(exc.limit.limit.amount)
+    return response
 
 
 # --- Routers ---------------------------------------------------------------
