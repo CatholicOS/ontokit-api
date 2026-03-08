@@ -1,9 +1,12 @@
 """Embedding service — manage embeddings, semantic search, similarity."""
 
+import base64
+import hashlib
 import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
+from cryptography.fernet import Fernet
 from rdflib import Graph, URIRef
 from rdflib import Literal as RDFLiteral
 from rdflib.namespace import OWL, RDF, RDFS
@@ -25,6 +28,25 @@ from ontokit.services.embedding_providers import get_embedding_provider
 from ontokit.services.embedding_text_builder import build_embedding_text
 
 logger = logging.getLogger(__name__)
+
+
+def _get_fernet() -> Fernet:
+    """Derive a Fernet key from the application secret."""
+    from ontokit.core.config import settings
+
+    key = hashlib.sha256(settings.secret_key.encode()).digest()
+    return Fernet(base64.urlsafe_b64encode(key))
+
+
+def _encrypt_secret(plaintext: str) -> str:
+    """Encrypt a secret string using Fernet symmetric encryption."""
+    return _get_fernet().encrypt(plaintext.encode()).decode()
+
+
+def _decrypt_secret(ciphertext: str) -> str:
+    """Decrypt a Fernet-encrypted secret string."""
+    return _get_fernet().decrypt(ciphertext.encode()).decode()
+
 
 _TYPE_CHECKS: list[tuple[URIRef, str]] = [
     (OWL.Class, "class"),
@@ -106,10 +128,7 @@ class EmbeddingService:
                 )
             )
         if update.api_key is not None:
-            # Store encrypted (simple base64 for now — should use proper encryption)
-            import base64
-
-            config.api_key_encrypted = base64.b64encode(update.api_key.encode()).decode()
+            config.api_key_encrypted = _encrypt_secret(update.api_key)
         if update.auto_embed_on_save is not None:
             config.auto_embed_on_save = update.auto_embed_on_save
 
@@ -202,8 +221,6 @@ class EmbeddingService:
 
     async def _get_provider(self, project_id: UUID):
         """Get the embedding provider for a project."""
-        import base64
-
         result = await self._db.execute(
             select(ProjectEmbeddingConfig).where(
                 ProjectEmbeddingConfig.project_id == project_id
@@ -215,7 +232,7 @@ class EmbeddingService:
         model_name = cfg.model_name if cfg else "all-MiniLM-L6-v2"
         api_key = None
         if cfg and cfg.api_key_encrypted:
-            api_key = base64.b64decode(cfg.api_key_encrypted).decode()
+            api_key = _decrypt_secret(cfg.api_key_encrypted)
 
         return get_embedding_provider(provider_name, model_name, api_key)
 
