@@ -245,13 +245,12 @@ async def get_current_user(
     username = token_payload.preferred_username
     roles = token_payload.roles
 
-    if not name or not email:
+    if not name or not email or not roles:
         userinfo = await fetch_userinfo(credentials.credentials)
         if userinfo:
             name = name or userinfo.get("name") or userinfo.get("preferred_username")
             email = email or userinfo.get("email")
             username = username or userinfo.get("preferred_username")
-            # Also extract roles from userinfo if not already present in token
             if not roles:
                 roles = _extract_roles(userinfo)
 
@@ -305,13 +304,12 @@ async def get_current_user_with_token(
     username = token_payload.preferred_username
     roles = token_payload.roles
 
-    if not name or not email:
+    if not name or not email or not roles:
         userinfo = await fetch_userinfo(credentials.credentials)
         if userinfo:
             name = name or userinfo.get("name") or userinfo.get("preferred_username")
             email = email or userinfo.get("email")
             username = username or userinfo.get("preferred_username")
-            # Also extract roles from userinfo if not already present in token
             if not roles:
                 roles = _extract_roles(userinfo)
 
