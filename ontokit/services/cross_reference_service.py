@@ -1,6 +1,6 @@
 """Cross-reference service — find all entities that reference a target IRI."""
 
-from rdflib import Graph, URIRef
+from rdflib import BNode, Graph, URIRef
 from rdflib import Literal as RDFLiteral
 from rdflib.namespace import OWL, RDF, RDFS
 
@@ -51,6 +51,24 @@ def _resolve_label(graph: Graph, subject: URIRef) -> str | None:
     return None
 
 
+def _resolve_bnode_owners(graph: Graph, bnode: BNode) -> list[URIRef]:
+    """Walk up from a blank node to find the named entities that own it."""
+    owners: list[URIRef] = []
+    visited: set[BNode] = set()
+    stack = [bnode]
+    while stack:
+        node = stack.pop()
+        if node in visited:
+            continue
+        visited.add(node)
+        for owner in graph.subjects(None, node):
+            if isinstance(owner, URIRef):
+                owners.append(owner)
+            elif isinstance(owner, BNode):
+                stack.append(owner)
+    return owners
+
+
 def get_cross_references(graph: Graph, target_iri: str) -> CrossReferencesResponse:
     """Find all entities that reference the target IRI and group by context."""
     target = URIRef(target_iri)
@@ -59,7 +77,16 @@ def get_cross_references(graph: Graph, target_iri: str) -> CrossReferencesRespon
     refs_by_context: dict[ReferenceContext, list[CrossReference]] = {}
 
     for s, p, _o in graph.triples((None, None, target)):
-        if not isinstance(s, URIRef):
+        # Resolve the referencing subjects to named entities (URIRefs).
+        # Blank-node subjects (e.g. OWL restrictions) are traced back to
+        # the named entities that own them.
+        if isinstance(s, URIRef):
+            source_iris = [s]
+        elif isinstance(s, BNode):
+            source_iris = _resolve_bnode_owners(graph, s)
+            if not source_iris:
+                continue
+        else:
             continue
 
         # Determine context from predicate
@@ -71,14 +98,15 @@ def get_cross_references(graph: Graph, target_iri: str) -> CrossReferencesRespon
             else:
                 continue
 
-        ref = CrossReference(
-            source_iri=str(s),
-            source_type=_resolve_entity_type(graph, s),
-            source_label=_resolve_label(graph, s),
-            reference_context=context,
-        )
+        for source in source_iris:
+            ref = CrossReference(
+                source_iri=str(source),
+                source_type=_resolve_entity_type(graph, source),
+                source_label=_resolve_label(graph, source),
+                reference_context=context,
+            )
 
-        refs_by_context.setdefault(context, []).append(ref)
+            refs_by_context.setdefault(context, []).append(ref)
 
     # Build groups
     groups = []
