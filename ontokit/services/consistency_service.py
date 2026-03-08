@@ -78,12 +78,22 @@ def _check_cycle_detect(graph: Graph) -> list[ConsistencyIssue]:
     for cls in graph.subjects(RDF.type, OWL.Class):
         if not isinstance(cls, URIRef):
             continue
-        # DFS over all subClassOf edges to detect cycles through any parent
-        visited: set[URIRef] = set()
-        stack = [cls]
-        while stack:
-            current = stack.pop()
-            if current in visited:
+
+        # DFS with path tracking: only flag a node as a cycle if it appears
+        # on the current ancestor path, not just because it was visited from
+        # a different branch (shared ancestors are not cycles).
+        path: set[URIRef] = set()
+        finished: set[URIRef] = set()
+        # Stack entries: (node, is_backtrack)
+        stack: list[tuple[URIRef, bool]] = [(cls, False)]
+        cycle_found = False
+
+        while stack and not cycle_found:
+            current, backtrack = stack.pop()
+            if backtrack:
+                path.discard(current)
+                continue
+            if current in path:
                 iri = str(cls)
                 if iri not in reported:
                     issues.append(
@@ -96,11 +106,18 @@ def _check_cycle_detect(graph: Graph) -> list[ConsistencyIssue]:
                         )
                     )
                     reported.add(iri)
-                break
-            visited.add(current)
+                cycle_found = True
+                continue
+            if current in finished:
+                continue
+            path.add(current)
+            # Push backtrack marker so we remove current from path after children
+            stack.append((current, True))
             for parent in graph.objects(current, RDFS.subClassOf):
                 if isinstance(parent, URIRef):
-                    stack.append(parent)
+                    stack.append((parent, False))
+            finished.add(current)
+
     return issues
 
 
