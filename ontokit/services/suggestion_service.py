@@ -555,7 +555,8 @@ class SuggestionService:
                     f"for project {session.project_id}"
                 )
             except Exception as e:
-                # Revert claim on failure so the session can be retried
+                # Rollback any failed transaction state before reverting the claim
+                await self.db.rollback()
                 session.status = SuggestionSessionStatus.ACTIVE.value
                 await self.db.commit()
                 logger.error(
