@@ -40,10 +40,7 @@ def _all_declared_uris(graph: Graph) -> set[URIRef]:
 
 
 def _is_deprecated(graph: Graph, uri: URIRef) -> bool:
-    for obj in graph.objects(uri, OWL.deprecated):
-        if str(obj).lower() in ("true", "1"):
-            return True
-    return False
+    return any(str(obj).lower() in ("true", "1") for obj in graph.objects(uri, OWL.deprecated))
 
 
 def _check_orphan_class(graph: Graph) -> list[ConsistencyIssue]:
