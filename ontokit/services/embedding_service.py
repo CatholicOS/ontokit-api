@@ -385,6 +385,7 @@ class EmbeddingService:
                 await self._db.commit()
 
         except Exception as e:
+            await self._db.rollback()
             job.status = "failed"
             job.error_message = str(e)
             job.completed_at = datetime.now(UTC)
