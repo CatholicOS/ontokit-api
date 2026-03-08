@@ -43,15 +43,25 @@ class VoyageEmbeddingProvider(EmbeddingProvider):
             all_embeddings: list[list[float]] = []
             for i in range(0, len(texts), 128):
                 batch = texts[i : i + 128]
-                resp = await client.post(
-                    "https://api.voyageai.com/v1/embeddings",
-                    headers={
-                        "Authorization": f"Bearer {self._api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={"input": batch, "model": self._model_name},
-                )
-                resp.raise_for_status()
+                try:
+                    resp = await client.post(
+                        "https://api.voyageai.com/v1/embeddings",
+                        headers={
+                            "Authorization": f"Bearer {self._api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={"input": batch, "model": self._model_name},
+                    )
+                    resp.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    raise ValueError(
+                        f"Voyage API error: {exc.response.status_code} "
+                        f"{exc.response.text}"
+                    ) from None
+                except httpx.HTTPError as exc:
+                    raise ValueError(
+                        f"Voyage API request failed: {type(exc).__name__}"
+                    ) from None
                 data = resp.json()
                 items = data["data"]
                 if len(items) != len(batch):

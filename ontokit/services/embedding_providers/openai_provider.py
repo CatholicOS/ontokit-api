@@ -44,12 +44,22 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             # Batch size 2048 per OpenAI API limits
             for i in range(0, len(texts), 2048):
                 batch = texts[i : i + 2048]
-                resp = await client.post(
-                    "https://api.openai.com/v1/embeddings",
-                    headers={"Authorization": f"Bearer {self._api_key}"},
-                    json={"input": batch, "model": self._model_name},
-                )
-                resp.raise_for_status()
+                try:
+                    resp = await client.post(
+                        "https://api.openai.com/v1/embeddings",
+                        headers={"Authorization": f"Bearer {self._api_key}"},
+                        json={"input": batch, "model": self._model_name},
+                    )
+                    resp.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    raise ValueError(
+                        f"OpenAI API error: {exc.response.status_code} "
+                        f"{exc.response.text}"
+                    ) from None
+                except httpx.HTTPError as exc:
+                    raise ValueError(
+                        f"OpenAI API request failed: {type(exc).__name__}"
+                    ) from None
                 data = resp.json()
                 # Sort by index to preserve order
                 sorted_data = sorted(data["data"], key=lambda x: x["index"])
