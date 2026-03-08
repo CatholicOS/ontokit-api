@@ -73,8 +73,8 @@ def get_cross_references(graph: Graph, target_iri: str) -> CrossReferencesRespon
     """Find all entities that reference the target IRI and group by context."""
     target = URIRef(target_iri)
 
-    # Collect references grouped by context
-    refs_by_context: dict[ReferenceContext, list[CrossReference]] = {}
+    # Collect unique references grouped by context (one per source IRI per context)
+    refs_by_context: dict[ReferenceContext, dict[str, CrossReference]] = {}
 
     for s, p, _o in graph.triples((None, None, target)):
         # Resolve the referencing subjects to named entities (URIRefs).
@@ -100,20 +100,23 @@ def get_cross_references(graph: Graph, target_iri: str) -> CrossReferencesRespon
             else:
                 continue
 
+        seen = refs_by_context.setdefault(context, {})
         for source in source_iris:
-            ref = CrossReference(
-                source_iri=str(source),
+            source_str = str(source)
+            if source_str in seen:
+                continue
+            seen[source_str] = CrossReference(
+                source_iri=source_str,
                 source_type=_resolve_entity_type(graph, source),
                 source_label=_resolve_label(graph, source),
                 reference_context=context,
             )
 
-            refs_by_context.setdefault(context, []).append(ref)
-
     # Build groups
     groups = []
     total = 0
-    for context, refs in refs_by_context.items():
+    for context, refs_dict in refs_by_context.items():
+        refs = list(refs_dict.values())
         groups.append(
             CrossReferenceGroup(
                 context=context,
