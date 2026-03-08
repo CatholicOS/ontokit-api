@@ -58,7 +58,16 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
                 except httpx.HTTPError as exc:
                     raise ValueError(f"OpenAI API request failed: {type(exc).__name__}") from None
                 data = resp.json()
-                # Sort by index to preserve order
-                sorted_data = sorted(data["data"], key=lambda x: x["index"])
+                items = data["data"]
+                if len(items) != len(batch):
+                    raise ValueError(
+                        f"OpenAI returned {len(items)} embeddings for {len(batch)} inputs"
+                    )
+                indexes = [item["index"] for item in items]
+                if len(set(indexes)) != len(indexes):
+                    raise ValueError("OpenAI response contains duplicate indexes")
+                if sorted(indexes) != list(range(len(batch))):
+                    raise ValueError("OpenAI response indexes are not contiguous from 0")
+                sorted_data = sorted(items, key=lambda x: x["index"])
                 all_embeddings.extend([item["embedding"] for item in sorted_data])
             return all_embeddings
