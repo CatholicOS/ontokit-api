@@ -120,12 +120,42 @@ async def trigger_consistency_check(
     job_id = str(uuid.uuid4())
     try:
         redis = _get_redis()
+        result_json = result.model_dump_json()
         cache_key = f"quality:{project_id}:{branch}"
-        await redis.set(cache_key, result.model_dump_json(), ex=600)
+        job_key = f"quality_job:{job_id}"
+        await redis.set(cache_key, result_json, ex=600)
+        await redis.set(job_key, result_json, ex=600)
     except Exception:
         logger.warning("Failed to cache consistency result in Redis", exc_info=True)
 
     return ConsistencyCheckTriggerResponse(job_id=job_id)
+
+
+@router.get(
+    "/{project_id}/quality/jobs/{job_id}",
+    response_model=ConsistencyCheckResult,
+)
+async def get_quality_job_result(
+    project_id: UUID,
+    job_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: OptionalUser,
+) -> ConsistencyCheckResult:
+    """Get consistency check results by job ID."""
+    await _verify_access(project_id, db, user)
+
+    try:
+        redis = _get_redis()
+        cached = await redis.get(f"quality_job:{job_id}")
+        if cached:
+            return ConsistencyCheckResult.model_validate_json(cached)
+    except Exception:
+        logger.warning("Failed to read quality job from Redis", exc_info=True)
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Job result not found or expired",
+    )
 
 
 @router.get(
