@@ -67,8 +67,10 @@ class SearchService:
 
         The search targets the ``name`` and ``description`` columns of the
         ``projects`` table using PostgreSQL's built-in full-text search via
-        ``to_tsvector`` / ``plainto_tsquery``.  Results are ranked with
-        ``ts_rank`` and support pagination through ``offset`` / ``limit``.
+        ``to_tsvector`` / ``to_tsquery``.  Inputs are sanitized with
+        ``_sanitize_tsquery_input`` before being passed to ``to_tsquery``.
+        Results are ranked with ``ts_rank`` and support pagination through
+        ``offset`` / ``limit``.
 
         Only *public* projects are returned (``is_public = True``).  If
         ``ontology_ids`` is provided on the query, results are further
