@@ -77,8 +77,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_suggestion_sessions_status")
-    op.drop_index("ix_suggestion_sessions_user_id")
-    op.drop_index("ix_suggestion_sessions_project_id")
+    op.drop_index("ix_suggestion_sessions_status", table_name="suggestion_sessions")
+    op.drop_index("ix_suggestion_sessions_user_id", table_name="suggestion_sessions")
+    op.drop_index("ix_suggestion_sessions_project_id", table_name="suggestion_sessions")
     op.drop_constraint("uq_suggestion_session", "suggestion_sessions")
     op.drop_table("suggestion_sessions")
