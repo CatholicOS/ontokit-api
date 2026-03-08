@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -517,8 +517,26 @@ class SuggestionService:
 
         count = 0
         for session in stale_sessions:
+            # Atomically claim the session to prevent concurrent workers from
+            # processing the same session.  Only proceed if this UPDATE affects
+            # exactly one row (i.e. no other worker claimed it first).
+            claim_result = await self.db.execute(
+                update(SuggestionSession)
+                .where(
+                    SuggestionSession.id == session.id,
+                    SuggestionSession.status == SuggestionSessionStatus.ACTIVE.value,
+                    SuggestionSession.changes_count > 0,
+                    SuggestionSession.last_activity < cutoff,
+                )
+                .values(status=SuggestionSessionStatus.AUTO_SUBMITTED.value)
+            )
+            if claim_result.rowcount != 1:
+                continue  # Another worker already claimed this session
+            await self.db.commit()
+            # Refresh so the in-memory object reflects the new status
+            await self.db.refresh(session)
+
             try:
-                # Create a mock user for the auto-submit
                 mock_user = CurrentUser(
                     id=session.user_id,
                     email=session.user_email,
@@ -537,6 +555,9 @@ class SuggestionService:
                     f"for project {session.project_id}"
                 )
             except Exception as e:
+                # Revert claim on failure so the session can be retried
+                session.status = SuggestionSessionStatus.ACTIVE.value
+                await self.db.commit()
                 logger.error(
                     f"Failed to auto-submit session {session.session_id}: {e}"
                 )
