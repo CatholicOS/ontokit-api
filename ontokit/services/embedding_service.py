@@ -401,6 +401,12 @@ class EmbeddingService:
 
         ontology = get_ontology_service()
         if not ontology.is_loaded(project_id, branch):
+            logger.warning(
+                "Ontology not loaded for project %s branch %s — skipping auto-embed of %s",
+                project_id,
+                branch,
+                entity_iri,
+            )
             return
 
         graph = await ontology._get_graph(project_id, branch)
