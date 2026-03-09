@@ -212,13 +212,7 @@ class SearchService:
             result: SPARQLResult = graph.query(query_text)
         except Exception as exc:
             logger.warning("SPARQL query execution failed: %s", exc)
-            elapsed = (time.perf_counter() - start_time) * 1000
-            return SPARQLResponse(
-                query_type=query_type,  # type: ignore[arg-type]
-                variables=[],
-                bindings=[],
-                took_ms=elapsed,
-            )
+            raise ValueError(f"SPARQL query execution failed: {exc}") from exc
 
         elapsed = (time.perf_counter() - start_time) * 1000
 
