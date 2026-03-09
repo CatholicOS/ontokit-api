@@ -13,7 +13,7 @@ from rdflib.namespace import OWL, RDF, RDFS
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ontokit.models.embedding import EmbeddingJob, EntityEmbedding, ProjectEmbeddingConfig
+from ontokit.models.embedding import EmbeddingJob, EntityEmbedding, ProjectEmbeddingConfig, Vector
 from ontokit.schemas.embeddings import (
     EmbeddingConfig,
     EmbeddingConfigUpdate,
@@ -451,6 +451,10 @@ class EmbeddingService:
         threshold: float = 0.3,
     ) -> SemanticSearchResponse:
         """Semantic search using cosine similarity."""
+        if Vector is None:
+            raise RuntimeError(
+                "pgvector is not installed. Semantic search requires the pgvector extension."
+            )
         # Check if embeddings exist
         count_q = (
             select(func.count())
@@ -513,6 +517,10 @@ class EmbeddingService:
         threshold: float = 0.5,
     ) -> list[SimilarEntity]:
         """Find entities similar to a given entity."""
+        if Vector is None:
+            raise RuntimeError(
+                "pgvector is not installed. Similarity search requires the pgvector extension."
+            )
         # Get entity's embedding
         emb_q = select(EntityEmbedding).where(
             EntityEmbedding.project_id == project_id,
@@ -565,6 +573,10 @@ class EmbeddingService:
         body: RankSuggestionRequest,
     ) -> list[RankedCandidate]:
         """Rank candidate entities by similarity to context entity."""
+        if Vector is None:
+            raise RuntimeError(
+                "pgvector is not installed. Ranking suggestions requires the pgvector extension."
+            )
         if not body.candidates:
             return []
 
