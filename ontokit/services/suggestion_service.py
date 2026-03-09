@@ -205,7 +205,6 @@ class SuggestionService:
         try:
             self.db.add(db_session)
             await self.db.commit()
-            await self.db.refresh(db_session)
         except IntegrityError:
             # Race: another request created an active session concurrently
             await self.db.rollback()
@@ -240,6 +239,21 @@ class SuggestionService:
             except Exception:
                 logger.warning(f"Failed to clean up orphaned branch {branch}")
             raise
+
+        # Refresh outside the branch-cleanup try/except so a refresh failure
+        # after a successful commit does not trigger branch deletion.
+        try:
+            await self.db.refresh(db_session)
+        except Exception:
+            logger.warning("Suggestion session %s committed but refresh failed", session_id)
+            # Re-fetch from DB since the ORM instance may be stale
+            re_result = await self.db.execute(
+                select(SuggestionSession).where(
+                    SuggestionSession.project_id == project_id,
+                    SuggestionSession.session_id == session_id,
+                )
+            )
+            db_session = re_result.scalar_one()
 
         return SuggestionSessionResponse(
             session_id=db_session.session_id,
