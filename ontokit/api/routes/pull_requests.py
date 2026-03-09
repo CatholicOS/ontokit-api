@@ -461,6 +461,35 @@ async def update_github_integration(
     return await service.update_github_integration(project_id, integration, user)
 
 
+@router.get("/{project_id}/github-integration/webhook-secret")
+async def get_webhook_secret(
+    project_id: UUID,
+    service: Annotated[PullRequestService, Depends(get_service)],
+    user: RequiredUser,
+) -> dict[str, str | None]:
+    """
+    Retrieve the webhook secret for configuring GitHub webhooks.
+
+    Only the project owner can view the secret.
+    """
+    return await service.get_webhook_secret(project_id, user)
+
+
+@router.post("/{project_id}/github-integration/webhook-setup")
+async def setup_webhook(
+    project_id: UUID,
+    service: Annotated[PullRequestService, Depends(get_service)],
+    user: RequiredUser,
+) -> dict[str, str | int | None]:
+    """
+    Auto-detect or auto-create a GitHub webhook for the project.
+
+    Uses the user's PAT to check for existing hooks or create one.
+    Requires the admin:repo_hook scope on the PAT for auto-creation.
+    """
+    return await service.setup_or_detect_webhook(project_id, user)
+
+
 @router.delete(
     "/{project_id}/github-integration",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -600,5 +629,38 @@ async def github_webhook(
             payload.get("ref", ""),
             payload.get("commits", []),
         )
+
+        # Trigger upstream sync if configured for webhook frequency
+        ref = payload.get("ref", "")
+        if ref.startswith("refs/heads/"):
+            push_branch = ref[len("refs/heads/") :]
+            commits = payload.get("commits", [])
+
+            from ontokit.models.upstream_sync import UpstreamSyncConfig
+
+            sync_result = await service.db.execute(
+                select(UpstreamSyncConfig).where(
+                    UpstreamSyncConfig.project_id == project_id,
+                    UpstreamSyncConfig.enabled.is_(True),
+                    UpstreamSyncConfig.frequency == "webhook",
+                )
+            )
+            sync_config = sync_result.scalar_one_or_none()
+
+            if sync_config and sync_config.branch == push_branch:
+                # Check if any commit touches the tracked file
+                touched_files: set[str] = set()
+                for commit in commits:
+                    touched_files.update(commit.get("added", []))
+                    touched_files.update(commit.get("modified", []))
+
+                if sync_config.file_path in touched_files:
+                    from ontokit.api.utils.redis import get_arq_pool
+
+                    sync_config.status = "checking"
+                    await service.db.commit()
+
+                    pool = await get_arq_pool()
+                    await pool.enqueue_job("run_upstream_check_task", str(project_id))
 
     return {"status": "ok"}

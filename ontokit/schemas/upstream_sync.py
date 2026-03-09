@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-SyncFrequency = Literal["6h", "12h", "24h", "48h", "weekly", "manual"]
+SyncFrequency = Literal["6h", "12h", "24h", "48h", "weekly", "manual", "webhook"]
 SyncUpdateMode = Literal["auto_apply", "review_required"]
 UpstreamSyncStatus = Literal["idle", "checking", "update_available", "up_to_date", "error"]
 SyncEventType = Literal["check_no_changes", "update_found", "auto_applied", "pr_created", "error"]

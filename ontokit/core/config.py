@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     github_app_private_key: str = ""
     github_token_encryption_key: str = ""
 
+    # External API URL (for webhook callback URLs)
+    api_base_url: str = "http://localhost:8000"
+
     # Frontend / Sitemap Revalidation
     frontend_url: str = ""  # e.g. http://localhost:3000
     revalidation_secret: str = ""  # shared secret for sitemap revalidation

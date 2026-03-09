@@ -462,6 +462,62 @@ class GitHubService:
             return [self._parse_comment(comment) for comment in data]
         return []
 
+    # Scope Helpers
+
+    @staticmethod
+    def has_hook_read_scope(scopes: str) -> bool:
+        """Check if the token scopes include hook read access."""
+        scope_set = {s.strip() for s in scopes.split(",") if s.strip()}
+        return bool(scope_set & {"admin:repo_hook", "read:repo_hook"})
+
+    @staticmethod
+    def has_hook_write_scope(scopes: str) -> bool:
+        """Check if the token scopes include hook write access."""
+        scope_set = {s.strip() for s in scopes.split(",") if s.strip()}
+        return bool(scope_set & {"admin:repo_hook", "write:repo_hook"})
+
+    # Webhook Management
+
+    async def list_repo_hooks(self, token: str, owner: str, repo: str) -> list[dict[str, Any]]:
+        """List webhooks configured on a GitHub repository."""
+        result = await self._request("GET", f"/repos/{owner}/{repo}/hooks", token)
+        return result if isinstance(result, list) else []
+
+    async def find_hook_by_url(
+        self, token: str, owner: str, repo: str, target_url: str
+    ) -> dict[str, Any] | None:
+        """Find a webhook matching a specific payload URL."""
+        hooks = await self.list_repo_hooks(token, owner, repo)
+        for hook in hooks:
+            config = hook.get("config", {})
+            if config.get("url") == target_url:
+                return hook
+        return None
+
+    async def create_repo_hook(
+        self,
+        token: str,
+        owner: str,
+        repo: str,
+        webhook_url: str,
+        webhook_secret: str,
+        events: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Create a webhook on a GitHub repository."""
+        data: dict[str, Any] = {
+            "name": "web",
+            "active": True,
+            "events": events or ["push"],
+            "config": {
+                "url": webhook_url,
+                "content_type": "json",
+                "secret": webhook_secret,
+                "insecure_ssl": "0",
+            },
+        }
+        result = await self._request("POST", f"/repos/{owner}/{repo}/hooks", token, data)
+        return result if isinstance(result, dict) else {}
+
     # Webhook Verification
 
     @staticmethod

@@ -1221,11 +1221,161 @@ class PullRequestService:
             # Generate webhook secret if enabling webhooks and none exists
             if integration_update.webhooks_enabled and not integration.webhook_secret:
                 integration.webhook_secret = secrets.token_urlsafe(32)
+            # Clear hook ID when disabling webhooks
+            if not integration_update.webhooks_enabled:
+                integration.github_hook_id = None
 
         await self.db.commit()
         await self.db.refresh(integration)
 
         return self._to_github_integration_response(integration)
+
+    async def get_webhook_secret(
+        self, project_id: UUID, user: CurrentUser
+    ) -> dict[str, str | None]:
+        """Retrieve the webhook secret for a project's GitHub integration."""
+        project = await self._get_project(project_id)
+
+        if project.owner_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the owner can view the webhook secret",
+            )
+
+        integration = await self._get_github_integration(project_id)
+        if not integration:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="GitHub integration not found",
+            )
+
+        if not integration.webhooks_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Webhooks are not enabled for this integration",
+            )
+
+        return {
+            "webhook_secret": integration.webhook_secret,
+            "webhook_url": f"/api/v1/webhooks/github/{project_id}",
+        }
+
+    async def setup_or_detect_webhook(self, project_id: UUID, user: CurrentUser) -> dict[str, Any]:
+        """Auto-detect or auto-create a GitHub webhook for the project.
+
+        Returns a dict with status, github_hook_id, and message.
+        """
+        from ontokit.core.config import settings
+
+        project = await self._get_project(project_id)
+        if project.owner_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the owner can setup webhooks",
+            )
+
+        integration = await self._get_github_integration(project_id)
+        if not integration:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="GitHub integration not found",
+            )
+
+        if not integration.webhooks_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Webhooks are not enabled",
+            )
+
+        # Get user's PAT
+        result = await self.db.execute(
+            select(UserGitHubToken).where(UserGitHubToken.user_id == user.id)
+        )
+        token_record = result.scalar_one_or_none()
+        if not token_record:
+            return {
+                "status": "no_token",
+                "github_hook_id": None,
+                "message": "No GitHub token configured. Connect your GitHub account in Settings.",
+            }
+
+        pat = decrypt_token(token_record.encrypted_token)
+        scopes = token_record.token_scopes or ""
+
+        webhook_url = f"{settings.api_base_url}/api/v1/projects/webhooks/github/{project_id}"
+
+        # Try to detect existing hook
+        if self.github_service.has_hook_read_scope(scopes):
+            try:
+                existing = await self.github_service.find_hook_by_url(
+                    pat, integration.repo_owner, integration.repo_name, webhook_url
+                )
+                if existing:
+                    hook_id = existing.get("id")
+                    integration.github_hook_id = hook_id
+                    await self.db.commit()
+                    return {
+                        "status": "configured",
+                        "github_hook_id": hook_id,
+                        "message": "Existing webhook detected on GitHub.",
+                    }
+            except Exception:
+                logger.warning("Failed to list hooks on GitHub", exc_info=True)
+
+            # Try to create if we have write scope
+            if self.github_service.has_hook_write_scope(scopes):
+                # GitHub rejects localhost URLs — can't auto-create in dev
+                if "localhost" in webhook_url or "127.0.0.1" in webhook_url:
+                    return {
+                        "status": "manual_required",
+                        "github_hook_id": None,
+                        "message": "Cannot auto-create webhooks with a localhost URL. "
+                        "Set API_BASE_URL to a publicly reachable address, "
+                        "or configure the webhook manually on GitHub.",
+                    }
+
+                if not integration.webhook_secret:
+                    integration.webhook_secret = secrets.token_urlsafe(32)
+
+                try:
+                    created = await self.github_service.create_repo_hook(
+                        pat,
+                        integration.repo_owner,
+                        integration.repo_name,
+                        webhook_url,
+                        integration.webhook_secret,
+                    )
+                    hook_id = created.get("id")
+                    integration.github_hook_id = hook_id
+                    await self.db.commit()
+                    return {
+                        "status": "created",
+                        "github_hook_id": hook_id,
+                        "message": "Webhook auto-created on GitHub.",
+                    }
+                except Exception as exc:
+                    logger.warning("Failed to create hook on GitHub: %s", exc, exc_info=True)
+                    return {
+                        "status": "error",
+                        "github_hook_id": None,
+                        "message": f"Failed to create webhook on GitHub: {exc}",
+                    }
+
+            # Has read but not write
+            return {
+                "status": "manual_required",
+                "github_hook_id": None,
+                "message": "Your token can read hooks but not create them. "
+                "Add the admin:repo_hook scope or configure the webhook manually.",
+            }
+
+        # No hook scopes at all
+        return {
+            "status": "no_scope",
+            "github_hook_id": None,
+            "message": "Your token lacks the admin:repo_hook scope. "
+            "Add it to auto-configure webhooks, or set up the webhook manually.",
+        }
 
     async def delete_github_integration(self, project_id: UUID, user: CurrentUser) -> None:
         """Delete GitHub integration for a project."""
@@ -1664,6 +1814,7 @@ class PullRequestService:
             repo_url=f"https://github.com/{integration.repo_owner}/{integration.repo_name}",
             connected_by_user_id=integration.connected_by_user_id,
             webhooks_enabled=integration.webhooks_enabled,
+            github_hook_id=integration.github_hook_id,
             default_branch=integration.default_branch,
             ontology_file_path=integration.ontology_file_path,
             turtle_file_path=integration.turtle_file_path,

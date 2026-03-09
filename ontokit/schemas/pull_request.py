@@ -261,6 +261,7 @@ class GitHubIntegrationResponse(BaseModel):
     repo_url: str | None = None
     connected_by_user_id: str | None = None
     webhooks_enabled: bool = False
+    github_hook_id: int | None = None
     default_branch: str
     ontology_file_path: str | None = None
     turtle_file_path: str | None = None
