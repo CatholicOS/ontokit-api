@@ -30,8 +30,9 @@ def _get_labels(graph: Graph, uri: URIRef) -> list[str]:
     return [str(o) for o in graph.objects(uri, RDFS.label) if isinstance(o, RDFLiteral)]
 
 
-def _get_parents(graph: Graph, uri: URIRef) -> list[str]:
-    return [str(p) for p in graph.objects(uri, RDFS.subClassOf) if isinstance(p, URIRef)]
+def _get_parents(graph: Graph, uri: URIRef, entity_type: str = "class") -> list[str]:
+    predicate = RDFS.subPropertyOf if entity_type == "property" else RDFS.subClassOf
+    return [str(p) for p in graph.objects(uri, predicate) if isinstance(p, URIRef)]
 
 
 def _get_declared_entities(graph: Graph) -> dict[str, str]:
@@ -145,8 +146,8 @@ class ChangeEventService:
                 new_vals["labels"] = new_labels
 
             # Check parents
-            old_parents = _get_parents(old_graph, uri) if old_graph else []
-            new_parents = _get_parents(new_graph, uri)
+            old_parents = _get_parents(old_graph, uri, etype) if old_graph else []
+            new_parents = _get_parents(new_graph, uri, etype)
             if sorted(old_parents) != sorted(new_parents):
                 changed_fields.append("parents")
                 old_vals["parents"] = old_parents
