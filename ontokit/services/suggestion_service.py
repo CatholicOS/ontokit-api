@@ -630,8 +630,7 @@ class SuggestionService:
                     await self.db.commit()
                 except Exception as revert_err:
                     logger.error(
-                        f"Failed to revert session {session.session_id} to ACTIVE: "
-                        f"{revert_err}"
+                        f"Failed to revert session {session.session_id} to ACTIVE: {revert_err}"
                     )
 
         return count
