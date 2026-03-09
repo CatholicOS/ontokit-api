@@ -1,9 +1,11 @@
 """Suggestion session service for managing suggester workflows."""
 
+import asyncio
 import json
 import logging
 import os
 import secrets
+from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -32,6 +34,9 @@ from ontokit.schemas.suggestion import (
 from ontokit.services.pull_request_service import get_pull_request_service
 
 logger = logging.getLogger(__name__)
+
+# Per-branch locks to serialize concurrent git writes (save + beacon_save)
+_branch_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 class SuggestionService:
@@ -260,45 +265,47 @@ class SuggestionService:
         project = await self._get_project(project_id)
         filename = self._get_git_ontology_path(project)
 
-        # Commit to the suggestion branch
-        commit_message = f"Update {data.entity_label}"
-        try:
-            commit_info = self.git_service.commit_to_branch(
-                project_id=project_id,
-                branch_name=session.branch,
-                ontology_content=data.content.encode("utf-8"),
-                filename=filename,
-                message=commit_message,
-                author_name=session.user_name or "Suggester",
-                author_email=session.user_email or "suggester@ontokit.dev",
-            )
-        except Exception as e:
-            logger.error(f"Failed to save suggestion: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to save suggestion to branch",
-            ) from e
+        # Serialize git writes per branch to prevent lost commits
+        async with _branch_locks[session.branch]:
+            # Commit to the suggestion branch
+            commit_message = f"Update {data.entity_label}"
+            try:
+                commit_info = self.git_service.commit_to_branch(
+                    project_id=project_id,
+                    branch_name=session.branch,
+                    ontology_content=data.content.encode("utf-8"),
+                    filename=filename,
+                    message=commit_message,
+                    author_name=session.user_name or "Suggester",
+                    author_email=session.user_email or "suggester@ontokit.dev",
+                )
+            except Exception as e:
+                logger.error(f"Failed to save suggestion: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to save suggestion to branch",
+                ) from e
 
-        # Update session metadata
-        session.changes_count += 1
-        self._update_entities_modified(session, data.entity_label)
-        session.last_activity = datetime.now(UTC)
-        try:
-            await self.db.commit()
-        except Exception as e:
-            await self.db.rollback()
-            logger.error(
-                "Failed to update session metadata after successful git commit: "
-                "session=%s branch=%s commit=%s error=%s",
-                session.session_id,
-                session.branch,
-                commit_info.hash,
-                e,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Saved to branch but failed to update session metadata",
-            ) from e
+            # Update session metadata
+            session.changes_count += 1
+            self._update_entities_modified(session, data.entity_label)
+            session.last_activity = datetime.now(UTC)
+            try:
+                await self.db.commit()
+            except Exception as e:
+                await self.db.rollback()
+                logger.error(
+                    "Failed to update session metadata after successful git commit: "
+                    "session=%s branch=%s commit=%s error=%s",
+                    session.session_id,
+                    session.branch,
+                    commit_info.hash,
+                    e,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Saved to branch but failed to update session metadata",
+                ) from e
 
         return SuggestionSaveResponse(
             commit_hash=commit_info.hash,
@@ -567,24 +574,26 @@ class SuggestionService:
         project = await self._get_project(project_id)
         filename = self._get_git_ontology_path(project)
 
-        # Commit without full validation (speed over correctness for beacon)
-        try:
-            self.git_service.commit_to_branch(
-                project_id=project_id,
-                branch_name=session.branch,
-                ontology_content=data.content.encode("utf-8"),
-                filename=filename,
-                message="Auto-save (beacon)",
-                author_name=session.user_name or "Suggester",
-                author_email=session.user_email or "suggester@ontokit.dev",
-            )
-        except Exception as e:
-            logger.warning(f"Beacon save failed for session {data.session_id}: {e}")
-            return  # Beacon is fire-and-forget
+        # Serialize git writes per branch to prevent lost commits
+        async with _branch_locks[session.branch]:
+            # Commit without full validation (speed over correctness for beacon)
+            try:
+                self.git_service.commit_to_branch(
+                    project_id=project_id,
+                    branch_name=session.branch,
+                    ontology_content=data.content.encode("utf-8"),
+                    filename=filename,
+                    message="Auto-save (beacon)",
+                    author_name=session.user_name or "Suggester",
+                    author_email=session.user_email or "suggester@ontokit.dev",
+                )
+            except Exception as e:
+                logger.warning(f"Beacon save failed for session {data.session_id}: {e}")
+                return  # Beacon is fire-and-forget
 
-        session.changes_count += 1
-        session.last_activity = datetime.now(UTC)
-        await self.db.commit()
+            session.changes_count += 1
+            session.last_activity = datetime.now(UTC)
+            await self.db.commit()
 
     async def auto_submit_stale_sessions(self) -> int:
         """Auto-create PRs for stale suggestion sessions.
