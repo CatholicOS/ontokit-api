@@ -57,8 +57,13 @@ class UpstreamSyncService:
 
         return project_response.user_role
 
-    async def get_config(self, project_id: UUID, user: CurrentUser) -> UpstreamSyncConfigResponse:
-        """Get upstream sync configuration for a project."""
+    async def get_config(
+        self, project_id: UUID, user: CurrentUser
+    ) -> UpstreamSyncConfigResponse | None:
+        """Get upstream sync configuration for a project.
+
+        Returns None if no configuration exists.
+        """
         await self._verify_access(project_id, user)
 
         result = await self.db.execute(
@@ -67,10 +72,7 @@ class UpstreamSyncService:
         config = result.scalar_one_or_none()
 
         if not config:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Upstream sync not configured for this project",
-            )
+            return None
 
         return UpstreamSyncConfigResponse.model_validate(config)
 

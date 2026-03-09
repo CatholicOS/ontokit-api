@@ -26,16 +26,16 @@ router = APIRouter()
 
 @router.get(
     "/{project_id}/upstream-sync",
-    response_model=UpstreamSyncConfigResponse,
+    response_model=UpstreamSyncConfigResponse | None,
 )
 async def get_upstream_sync_config(
     project_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     user: RequiredUser,
-) -> UpstreamSyncConfigResponse:
+) -> UpstreamSyncConfigResponse | None:
     """Get upstream sync configuration for a project.
 
-    Returns 404 if no configuration exists.
+    Returns null if no configuration exists.
     """
     service = get_upstream_sync_service(db)
     return await service.get_config(project_id, user)
