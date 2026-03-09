@@ -86,7 +86,13 @@ class SuggestionService:
     def _get_git_ontology_path(self, project: Project) -> str:
         """Get the ontology file path within the git repo."""
         if project.source_file_path:
-            return os.path.basename(project.source_file_path)
+            path = os.path.normpath(project.source_file_path).lstrip("/\\")
+            if path.startswith(".."):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid ontology path",
+                )
+            return path
         return "ontology.ttl"
 
     async def _get_session(self, project_id: UUID, session_id: str) -> SuggestionSession:
