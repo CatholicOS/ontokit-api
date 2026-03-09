@@ -764,7 +764,7 @@ class ProjectService:
                         email=info["email"],
                     )
 
-        role_order = {"owner": 0, "admin": 1, "editor": 2, "viewer": 3}
+        role_order = {"owner": 0, "admin": 1, "editor": 2, "suggester": 3, "viewer": 4}
         sorted_members = sorted(project.members, key=lambda m: role_order.get(m.role, 99))
         items = [self._member_to_response(m, user_info_map.get(m.user_id)) for m in sorted_members]
 

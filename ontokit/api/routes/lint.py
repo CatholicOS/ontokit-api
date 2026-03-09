@@ -5,28 +5,28 @@ import contextlib
 import json
 import logging
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
-from arq import ArqRedis, create_pool
-from arq.connections import RedisSettings
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ontokit.core.auth import OptionalUser, RequiredUser
-from ontokit.core.config import settings
+from ontokit.api.utils.redis import get_arq_pool
+from ontokit.core.auth import CurrentUser, OptionalUser, RequiredUser
 from ontokit.core.database import async_session_maker, get_db
 from ontokit.models.lint import LintIssue, LintRun, LintRunStatus
 from ontokit.models.project import Project
 from ontokit.schemas.lint import (
     LintIssueListResponse,
     LintIssueResponse,
+    LintIssueTypeValue,
     LintRuleInfo,
     LintRulesResponse,
     LintRunDetailResponse,
     LintRunListResponse,
     LintRunResponse,
+    LintRunStatusValue,
     LintSummaryResponse,
     LintTriggerResponse,
 )
@@ -39,31 +39,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# ARQ Redis pool (lazy initialized)
-_arq_pool: ArqRedis | None = None
-
-
-async def get_arq_pool() -> ArqRedis:
-    """Get or create the ARQ Redis connection pool."""
-    global _arq_pool
-    if _arq_pool is None:
-        from urllib.parse import urlparse
-
-        redis_url = str(settings.redis_url)
-        parsed = urlparse(redis_url)
-        redis_settings = RedisSettings(
-            host=parsed.hostname or "localhost",
-            port=parsed.port or 6379,
-            database=int(parsed.path.lstrip("/") or "0"),
-        )
-        _arq_pool = await create_pool(redis_settings)
-    return _arq_pool
-
-
 async def verify_project_access(
     project_id: UUID,
     db: AsyncSession,
-    user: dict | None,
+    user: CurrentUser | None,
     require_write: bool = False,
 ) -> Project:
     """
@@ -216,7 +195,7 @@ async def get_lint_status(
         last_run_response = LintRunResponse(
             id=last_run.id,
             project_id=last_run.project_id,
-            status=last_run.status,
+            status=cast("LintRunStatusValue", last_run.status),
             started_at=last_run.started_at,
             completed_at=last_run.completed_at,
             issues_found=last_run.issues_found,
@@ -269,7 +248,7 @@ async def list_lint_runs(
             LintRunResponse(
                 id=run.id,
                 project_id=run.project_id,
-                status=run.status,
+                status=cast("LintRunStatusValue", run.status),
                 started_at=run.started_at,
                 completed_at=run.completed_at,
                 issues_found=run.issues_found,
@@ -326,7 +305,7 @@ async def get_lint_run(
     return LintRunDetailResponse(
         id=run.id,
         project_id=run.project_id,
-        status=run.status,
+        status=cast("LintRunStatusValue", run.status),
         started_at=run.started_at,
         completed_at=run.completed_at,
         issues_found=run.issues_found,
@@ -336,7 +315,7 @@ async def get_lint_run(
                 id=issue.id,
                 run_id=issue.run_id,
                 project_id=issue.project_id,
-                issue_type=issue.issue_type,
+                issue_type=cast("LintIssueTypeValue", issue.issue_type),
                 rule_id=issue.rule_id,
                 message=issue.message,
                 subject_iri=issue.subject_iri,
@@ -428,7 +407,7 @@ async def get_lint_issues(
                 id=issue.id,
                 run_id=issue.run_id,
                 project_id=issue.project_id,
-                issue_type=issue.issue_type,
+                issue_type=cast("LintIssueTypeValue", issue.issue_type),
                 rule_id=issue.rule_id,
                 message=issue.message,
                 subject_iri=issue.subject_iri,
@@ -502,7 +481,7 @@ async def get_lint_rules() -> LintRulesResponse:
                 rule_id=rule.rule_id,
                 name=rule.name,
                 description=rule.description,
-                severity=rule.severity,
+                severity=cast("LintIssueTypeValue", rule.severity),
             )
             for rule in rules
         ]
@@ -533,7 +512,7 @@ class LintConnectionManager:
                 del self.active_connections[project_id]
         logger.debug(f"WebSocket disconnected for project {project_id}")
 
-    async def broadcast(self, project_id: str, message: dict) -> None:
+    async def broadcast(self, project_id: str, message: dict[str, object]) -> None:
         """Send message to all connections for a project."""
         if project_id in self.active_connections:
             disconnected = []

@@ -1,20 +1,33 @@
 """Project and project member schemas."""
 
+import re
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # Role type for project members
-ProjectRole = Literal["owner", "admin", "editor", "viewer"]
+ProjectRole = Literal["owner", "admin", "editor", "suggester", "viewer"]
+
+_IRI_PATTERN = re.compile(r"^(https?://|urn:)\S+$")
+
+
+def _validate_iri(value: str) -> str:
+    """Validate that a string is a well-formed IRI with a recognised scheme."""
+    if not _IRI_PATTERN.match(value):
+        raise ValueError(
+            "Invalid IRI: must start with 'http://', 'https://', or 'urn:' "
+            "and contain no whitespace"
+        )
+    return value
 
 
 class ProjectBase(BaseModel):
     """Base project fields."""
 
     name: str = Field(..., min_length=1, max_length=255)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=5000)
     is_public: bool = False
 
 
@@ -28,11 +41,14 @@ class ProjectUpdate(BaseModel):
     """Schema for updating a project."""
 
     name: str | None = Field(None, min_length=1, max_length=255)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=5000)
     is_public: bool | None = None
     label_preferences: list[str] | None = Field(
         None,
-        description="Label preferences for ontology display. Format: ['rdfs:label@en', 'skos:prefLabel', ...]",
+        description=(
+            "Label preferences for ontology display. "
+            "Format: ['rdfs:label@en', 'skos:prefLabel', ...]"
+        ),
     )
 
 
@@ -40,8 +56,8 @@ class ProjectOwner(BaseModel):
     """Minimal owner information for project responses."""
 
     id: str
-    name: str | None = None
-    email: str | None = None
+    name: str | None = Field(default=None, max_length=255)
+    email: str | None = Field(default=None, max_length=320)
 
 
 class NormalizationReportResponse(BaseModel):
@@ -74,11 +90,18 @@ class ProjectResponse(ProjectBase):
     # Import-related fields (optional, only set when project was created via import)
     source_file_path: str | None = None
     git_ontology_path: str | None = None
-    ontology_iri: str | None = None
+    ontology_iri: str | None = Field(default=None, max_length=2048)
     # Label preferences for ontology display
     label_preferences: list[str] | None = None
     # Normalization report from initial import
     normalization_report: NormalizationReportResponse | None = None
+
+    @field_validator("ontology_iri")
+    @classmethod
+    def ontology_iri_must_be_valid(cls, v: str | None) -> str | None:
+        if v is not None:
+            return _validate_iri(v)
+        return v
 
     class Config:
         from_attributes = True
@@ -87,17 +110,31 @@ class ProjectResponse(ProjectBase):
 class ExtractedOntologyMetadata(BaseModel):
     """Metadata extracted from an ontology file during import."""
 
-    ontology_iri: str | None = None
-    title: str | None = None
-    description: str | None = None
+    ontology_iri: str | None = Field(default=None, max_length=2048)
+    title: str | None = Field(default=None, max_length=500)
+    description: str | None = Field(default=None, max_length=5000)
     format_detected: str
+
+    @field_validator("ontology_iri")
+    @classmethod
+    def ontology_iri_must_be_valid(cls, v: str | None) -> str | None:
+        if v is not None:
+            return _validate_iri(v)
+        return v
 
 
 class ProjectImportResponse(ProjectResponse):
     """Schema for project import responses."""
 
-    ontology_iri: str | None = None
+    ontology_iri: str | None = Field(default=None, max_length=2048)
     file_path: str
+
+    @field_validator("ontology_iri")
+    @classmethod
+    def import_ontology_iri_must_be_valid(cls, v: str | None) -> str | None:
+        if v is not None:
+            return _validate_iri(v)
+        return v
 
 
 class ProjectListResponse(BaseModel):
@@ -116,7 +153,7 @@ class MemberBase(BaseModel):
     """Base member fields."""
 
     user_id: str
-    role: ProjectRole = "viewer"
+    role: ProjectRole = "suggester"
 
 
 class MemberCreate(MemberBase):
@@ -141,8 +178,8 @@ class MemberUser(BaseModel):
     """User information for member responses."""
 
     id: str
-    name: str | None = None
-    email: str | None = None
+    name: str | None = Field(default=None, max_length=255)
+    email: str | None = Field(default=None, max_length=320)
 
 
 class MemberResponse(MemberBase):
@@ -172,9 +209,9 @@ class RevisionCommit(BaseModel):
 
     hash: str
     short_hash: str
-    message: str
-    author_name: str
-    author_email: str
+    message: str = Field(..., max_length=5000)
+    author_name: str = Field(..., max_length=255)
+    author_email: str = Field(..., max_length=320)
     timestamp: str
     is_merge: bool = False
     merged_branch: str | None = None
@@ -225,18 +262,18 @@ class RevisionFileResponse(BaseModel):
 class BranchInfo(BaseModel):
     """Information about a git branch."""
 
-    name: str
+    name: str = Field(..., max_length=255)
     is_current: bool = False
     is_default: bool = False
     commit_hash: str | None = None
-    commit_message: str | None = None
+    commit_message: str | None = Field(default=None, max_length=5000)
     commit_date: datetime | None = None
     commits_ahead: int = 0
     commits_behind: int = 0
     remote_commits_ahead: int | None = None
     remote_commits_behind: int | None = None
     created_by_id: str | None = None
-    created_by_name: str | None = None
+    created_by_name: str | None = Field(default=None, max_length=255)
     can_delete: bool = False
     has_open_pr: bool = False
     has_delete_permission: bool = False

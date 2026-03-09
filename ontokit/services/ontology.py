@@ -1,7 +1,7 @@
 """Ontology service for managing OWL ontologies."""
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 from typing import Literal as TypingLiteral
 from uuid import UUID
 
@@ -394,7 +394,7 @@ class OntologyService:
         def sort_key(cls: OWLClassResponse) -> str:
             if cls.labels:
                 return cls.labels[0].value.lower()
-            return cls.iri.lower()
+            return str(cls.iri).lower()
 
         root_classes.sort(key=sort_key)
         return root_classes
@@ -424,7 +424,7 @@ class OntologyService:
         def sort_key(cls: OWLClassResponse) -> str:
             if cls.labels:
                 return cls.labels[0].value.lower()
-            return cls.iri.lower()
+            return str(cls.iri).lower()
 
         children.sort(key=sort_key)
         return children
@@ -497,15 +497,16 @@ class OntologyService:
                         if isinstance(obj, RDFLiteral):
                             all_labels.append(str(obj))
 
-                # Check for match
-                matched = (
-                    query_lower in local_name.lower()
-                    or query_lower in iri_str.lower()
-                    or any(query_lower in lbl.lower() for lbl in all_labels)
-                )
+                # Check for match ("*" matches everything)
+                if query_lower != "*":
+                    matched = (
+                        query_lower in local_name.lower()
+                        or query_lower in iri_str.lower()
+                        or any(query_lower in lbl.lower() for lbl in all_labels)
+                    )
 
-                if not matched:
-                    continue
+                    if not matched:
+                        continue
 
                 # Resolve display label
                 display_label = select_preferred_label(graph, subject, label_preferences)
@@ -523,7 +524,9 @@ class OntologyService:
                     EntitySearchResult(
                         iri=iri_str,
                         label=display_label,
-                        entity_type=entity_type,
+                        entity_type=cast(
+                            TypingLiteral["class", "property", "individual"], entity_type
+                        ),
                         deprecated=deprecated,
                     )
                 )
@@ -870,7 +873,7 @@ class OntologyService:
                 )
 
         return OWLClassResponse(
-            iri=str(class_uri),
+            iri=str(class_uri),  # type: ignore[arg-type]  # Pydantic coerces str to HttpUrl
             labels=labels,
             comments=comments,
             deprecated=deprecated,

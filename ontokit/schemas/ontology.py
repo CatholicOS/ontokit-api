@@ -1,26 +1,51 @@
 """Ontology schemas."""
 
+import re
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, field_validator
+
+_IRI_PATTERN = re.compile(r"^(https?://|urn:)\S+$")
+
+
+def _validate_iri(value: str) -> str:
+    """Validate that a string is a well-formed IRI with a recognised scheme."""
+    if not _IRI_PATTERN.match(value):
+        raise ValueError(
+            "Invalid IRI: must start with 'http://', 'https://', or 'urn:' "
+            "and contain no whitespace"
+        )
+    return value
 
 
 class LocalizedString(BaseModel):
     """A string with language tag."""
 
-    value: str
-    lang: str = "en"
+    value: str = Field(..., max_length=5000)
+    lang: str = Field(default="en", max_length=10)
 
 
 class OntologyBase(BaseModel):
     """Base ontology fields."""
 
-    iri: HttpUrl = Field(..., description="The ontology IRI")
-    title: str = Field(..., min_length=1, max_length=255)
-    description: str | None = None
-    version_iri: HttpUrl | None = None
+    iri: str = Field(..., description="The ontology IRI", max_length=2048)
+    title: str = Field(..., min_length=1, max_length=500)
+    description: str | None = Field(default=None, max_length=5000)
+    version_iri: str | None = Field(default=None, max_length=2048)
     labels: list[LocalizedString] = Field(default_factory=list)
+
+    @field_validator("iri")
+    @classmethod
+    def iri_must_be_valid(cls, v: str) -> str:
+        return _validate_iri(v)
+
+    @field_validator("version_iri")
+    @classmethod
+    def version_iri_must_be_valid(cls, v: str | None) -> str | None:
+        if v is not None:
+            return _validate_iri(v)
+        return v
 
 
 class OntologyCreate(OntologyBase):
@@ -32,10 +57,17 @@ class OntologyCreate(OntologyBase):
 class OntologyUpdate(BaseModel):
     """Schema for updating ontology metadata."""
 
-    title: str | None = Field(None, min_length=1, max_length=255)
-    description: str | None = None
-    version_iri: HttpUrl | None = None
+    title: str | None = Field(None, min_length=1, max_length=500)
+    description: str | None = Field(default=None, max_length=5000)
+    version_iri: str | None = Field(default=None, max_length=2048)
     labels: list[LocalizedString] | None = None
+
+    @field_validator("version_iri")
+    @classmethod
+    def version_iri_must_be_valid(cls, v: str | None) -> str | None:
+        if v is not None:
+            return _validate_iri(v)
+        return v
 
 
 class OntologyResponse(OntologyBase):

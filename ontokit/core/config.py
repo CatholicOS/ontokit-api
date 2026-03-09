@@ -29,11 +29,11 @@ class Settings(BaseSettings):
 
     # Database
     database_url: PostgresDsn = Field(
-        default="postgresql+asyncpg://ontokit:ontokit@localhost:5432/ontokit"
+        default="postgresql+asyncpg://ontokit:ontokit@localhost:5432/ontokit"  # type: ignore[assignment]
     )
 
     # Redis
-    redis_url: RedisDsn = Field(default="redis://localhost:6379/0")
+    redis_url: RedisDsn = Field(default="redis://localhost:6379/0")  # type: ignore[assignment]
 
     # MinIO / S3
     minio_endpoint: str = "localhost:9000"
@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     github_app_id: str = ""
     github_app_private_key: str = ""
     github_token_encryption_key: str = ""
+
+    # External API URL (for webhook callback URLs)
+    api_base_url: str = "http://localhost:8000"
 
     # Frontend / Sitemap Revalidation
     frontend_url: str = ""  # e.g. http://localhost:3000

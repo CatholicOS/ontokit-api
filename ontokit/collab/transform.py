@@ -51,7 +51,7 @@ def transform_against_history(op: Operation, history: list[Operation]) -> Operat
 
     Returns the transformed operation, or None if it was nullified.
     """
-    transformed = op
+    transformed: Operation | None = op
 
     for historical_op in history:
         if transformed is None:

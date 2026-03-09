@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from ontokit.models.lint import LintRun
     from ontokit.models.normalization import NormalizationRun
     from ontokit.models.pull_request import GitHubIntegration, PullRequest
+    from ontokit.models.suggestion_session import SuggestionSession
 
 from ontokit.core.database import Base
 
@@ -64,6 +65,9 @@ class Project(Base):
         back_populates="project", cascade="all, delete-orphan"
     )
     join_requests: Mapped[list["JoinRequest"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan"
+    )
+    suggestion_sessions: Mapped[list["SuggestionSession"]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
 

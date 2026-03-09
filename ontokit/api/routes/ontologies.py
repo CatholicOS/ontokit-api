@@ -139,7 +139,7 @@ async def get_ontology_history(
     ontology_id: UUID,
     service: Annotated[OntologyService, Depends(get_ontology_service)],
     limit: int = 50,
-) -> list[dict]:
+) -> list[dict[str, object]]:
     """Get version history for an ontology."""
     return await service.get_history(ontology_id, limit=limit)
 
@@ -150,6 +150,6 @@ async def diff_ontology_versions(
     service: Annotated[OntologyService, Depends(get_ontology_service)],
     from_version: str,
     to_version: str = "HEAD",
-) -> dict:
+) -> dict[str, object]:
     """Compare two versions of an ontology."""
     return await service.diff(ontology_id, from_version, to_version)

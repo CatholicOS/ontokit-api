@@ -17,4 +17,9 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     GRANT ALL PRIVILEGES ON DATABASE ontokit TO ontokit;
 EOSQL
 
-echo "Databases initialized: zitadel, ontokit"
+# Enable pgvector extension in ontokit database (requires superuser)
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "ontokit" <<-EOSQL
+    CREATE EXTENSION IF NOT EXISTS vector;
+EOSQL
+
+echo "Databases initialized: zitadel, ontokit (with pgvector)"

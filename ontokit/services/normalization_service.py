@@ -3,6 +3,7 @@
 import json
 import logging
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -32,7 +33,7 @@ class NormalizationService:
         self.git_service = git_service or get_git_service()
         self.extractor = OntologyMetadataExtractor()
 
-    async def get_cached_status(self, project: Project) -> dict:
+    async def get_cached_status(self, project: Project) -> dict[str, Any]:
         """
         Get cached normalization status from database (fast, no expensive check).
 
@@ -108,7 +109,7 @@ class NormalizationService:
             "error": None,
         }
 
-    async def check_normalization_status(self, project: Project) -> dict:
+    async def check_normalization_status(self, project: Project) -> dict[str, Any]:
         """
         Check if a project's ontology needs normalization (expensive operation).
 
@@ -182,7 +183,7 @@ class NormalizationService:
         user: CurrentUser | None = None,
         trigger_type: str = "manual",
         dry_run: bool = False,
-    ) -> NormalizationRun:
+    ) -> tuple[NormalizationRun, str | None, str | None]:
         """
         Run normalization on a project's ontology.
 
@@ -193,7 +194,7 @@ class NormalizationService:
             dry_run: If True, don't commit changes, just record what would happen
 
         Returns:
-            The NormalizationRun record
+            Tuple of (NormalizationRun, original_content, normalized_content)
         """
         if not project.source_file_path:
             raise ValueError("Project has no ontology file")

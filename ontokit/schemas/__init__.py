@@ -49,6 +49,16 @@ from ontokit.schemas.pull_request import (
     SemanticDiffResponse,
     TripleChange,
 )
+from ontokit.schemas.suggestion import (
+    SuggestionBeaconRequest,
+    SuggestionSaveRequest,
+    SuggestionSaveResponse,
+    SuggestionSessionListResponse,
+    SuggestionSessionResponse,
+    SuggestionSessionSummary,
+    SuggestionSubmitRequest,
+    SuggestionSubmitResponse,
+)
 
 __all__ = [
     "DeviceCodeRequest",
@@ -108,4 +118,13 @@ __all__ = [
     "ReviewResponse",
     "SemanticDiffResponse",
     "TripleChange",
+    # Suggestion schemas
+    "SuggestionBeaconRequest",
+    "SuggestionSaveRequest",
+    "SuggestionSaveResponse",
+    "SuggestionSessionListResponse",
+    "SuggestionSessionResponse",
+    "SuggestionSessionSummary",
+    "SuggestionSubmitRequest",
+    "SuggestionSubmitResponse",
 ]

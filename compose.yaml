@@ -30,7 +30,7 @@ services:
   # PostgreSQL Database (shared by Zitadel and OntoKit API)
   # ============================================================================
   postgres:
-    image: postgres:17-alpine
+    image: pgvector/pgvector:pg17
     container_name: ontokit-postgres
     restart: unless-stopped
     environment:
@@ -116,6 +116,7 @@ services:
     command: 'start-from-init --masterkey "MasterkeyNeedsToHave32Characters"'
     environment:
       ZITADEL_EXTERNALDOMAIN: localhost
+      ZITADEL_EXTERNALPORT: 8080
       ZITADEL_EXTERNALSECURE: false
       ZITADEL_TLS_ENABLED: false
 
@@ -247,7 +248,7 @@ services:
       ZITADEL_CLIENT_SECRET: ${ZITADEL_CLIENT_SECRET:-}
       ZITADEL_SERVICE_TOKEN: ${ZITADEL_SERVICE_TOKEN:-}
       # CORS
-      CORS_ORIGINS: '["http://localhost:3000","http://localhost:5173"]'
+      CORS_ORIGINS: '["http://localhost:3000","http://localhost:5173","http://localhost:53000"]'
       # Git Repository Storage
       GIT_REPOS_BASE_PATH: /data/repos
       # GitHub Integration

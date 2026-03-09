@@ -22,6 +22,7 @@ from ontokit.schemas.join_request import (
     PendingJoinRequestsSummary,
     ProjectPendingCount,
 )
+from ontokit.services.notification_service import NotificationService
 from ontokit.services.user_service import UserService, get_user_service
 
 logger = logging.getLogger(__name__)
@@ -150,6 +151,20 @@ class JoinRequestService:
                 detail="You already have a pending join request for this project",
             ) from exc
 
+        # Notify project owners/admins about the new join request
+        notif = NotificationService(self.db)
+        await notif.notify_project_roles(
+            project_id=project_id,
+            project_name=project.name,
+            roles=["owner", "admin"],
+            notification_type="join_request",
+            title=f"{user.name or user.id} requested to join {project.name}",
+            body=data.message[:200] if data.message else None,
+            target_id=str(jr.id),
+            exclude_user_id=user.id,
+        )
+        await self.db.commit()
+
         return self._to_response(jr)
 
     async def list_requests(
@@ -188,7 +203,7 @@ class JoinRequestService:
         user_info: dict[str, dict[str, str | None]] = {}
         if responder_ids:
             info = await self.user_service.get_users_info(responder_ids)
-            user_info = {uid: dict(uinfo) for uid, uinfo in info.items()}
+            user_info = {uid: dict(uinfo) for uid, uinfo in info.items()}  # type: ignore[arg-type]
 
         return JoinRequestListResponse(
             items=[self._to_response(jr, user_info) for jr in requests],
@@ -202,7 +217,7 @@ class JoinRequestService:
         action: JoinRequestAction,
         user: CurrentUser,
     ) -> JoinRequestResponse:
-        """Approve a join request and add the user as an editor."""
+        """Approve a join request and add the user with the suggester role."""
         await self._check_admin_access(project_id, user)
 
         result = await self.db.execute(
@@ -230,11 +245,11 @@ class JoinRequestService:
         jr.responded_at = datetime.now(UTC)
         jr.response_message = action.response_message
 
-        # Add user as editor
+        # Add user as suggester
         member = ProjectMember(
             project_id=project_id,
             user_id=jr.user_id,
-            role="editor",
+            role="suggester",
         )
         self.db.add(member)
 
@@ -251,6 +266,20 @@ class JoinRequestService:
             jr.response_message = action.response_message
             await self.db.commit()
             await self.db.refresh(jr)
+
+        # Notify the requesting user that their request was approved
+        project = await self._get_project(project_id)
+        notif = NotificationService(self.db)
+        await notif.create_notification(
+            user_id=jr.user_id,
+            notification_type="join_request",
+            title=f"Your request to join {project.name} was approved",
+            body=action.response_message,
+            project_id=project_id,
+            project_name=project.name,
+            target_id=str(jr.id),
+        )
+        await self.db.commit()
 
         return self._to_response(jr)
 
@@ -290,6 +319,20 @@ class JoinRequestService:
 
         await self.db.commit()
         await self.db.refresh(jr)
+
+        # Notify the requesting user that their request was declined
+        project = await self._get_project(project_id)
+        notif = NotificationService(self.db)
+        await notif.create_notification(
+            user_id=jr.user_id,
+            notification_type="join_request",
+            title=f"Your request to join {project.name} was declined",
+            body=action.response_message,
+            project_id=project_id,
+            project_name=project.name,
+            target_id=str(jr.id),
+        )
+        await self.db.commit()
 
         return self._to_response(jr)
 

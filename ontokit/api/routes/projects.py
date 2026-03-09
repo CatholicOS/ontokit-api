@@ -1,5 +1,6 @@
 """Project management endpoints."""
 
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -58,6 +59,8 @@ from ontokit.services.ontology import OntologyService, get_ontology_service
 from ontokit.services.project_service import ProjectService, get_project_service
 from ontokit.services.sitemap_notifier import notify_sitemap_add, notify_sitemap_remove
 from ontokit.services.storage import StorageError, StorageService, get_storage_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -231,7 +234,7 @@ async def create_project_from_github(
     default_branch = data.default_branch
     if not default_branch:
         repo_info = await github.get_repo_info(pat, data.repo_owner, data.repo_name)
-        default_branch = repo_info.get("default_branch", "main")
+        default_branch = repo_info.get("default_branch") or "main"
 
     # Download the ontology file from GitHub
     try:
@@ -1168,6 +1171,7 @@ async def save_source_content(
     storage: Annotated[StorageService, Depends(get_storage)],
     ontology: Annotated[OntologyService, Depends(get_ontology)],
     git: Annotated[GitRepositoryService, Depends(get_git)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     user: RequiredUser,
     branch: str | None = Query(default=None, description="Branch to commit to"),
 ) -> SourceContentSaveResponse:
@@ -1231,6 +1235,16 @@ async def save_source_content(
             detail=f"Failed to save to storage: {e}",
         ) from e
 
+    # Capture old graph for change event diffing (before the commit)
+    old_graph = None
+    was_loaded = ontology.is_loaded(project_id, current_branch)
+    try:
+        if not was_loaded:
+            await ontology.load_from_git(project_id, current_branch, filename, git)
+        old_graph = await ontology._get_graph(project_id, current_branch)
+    except Exception:
+        logger.debug("Could not capture pre-commit graph for diff", exc_info=True)
+
     # Commit to git on the specified branch
     try:
         commit_info = git.commit_changes(
@@ -1254,9 +1268,58 @@ async def save_source_content(
         await ontology.load_from_git(project_id, current_branch, filename, git)
     except Exception as e:
         # Log but don't fail - the commit succeeded
-        import logging
+        logger.warning("Failed to reload ontology after save: %s", e)
 
-        logging.warning(f"Failed to reload ontology after save: {e}")
+    # Record change events (analytics)
+    change_events = []
+    try:
+        new_graph = await ontology._get_graph(project_id, current_branch)
+        from ontokit.services.change_event_service import ChangeEventService
+
+        change_service = ChangeEventService(db)
+        change_events = await change_service.record_events_from_diff(
+            project_id,
+            current_branch,
+            old_graph,
+            new_graph,
+            user.id,
+            user.name,
+            commit_info.hash,
+        )
+    except Exception:
+        logger.warning("Failed to record change events", exc_info=True)
+
+    # Auto-embed changed entities if configured
+    if change_events:
+        try:
+            from ontokit.models.change_event import ChangeEventType
+            from ontokit.services.embedding_service import EmbeddingService
+
+            embed_config = await EmbeddingService(db).get_config(project_id)
+            if embed_config and embed_config.auto_embed_on_save:
+                from ontokit.api.utils.redis import get_arq_pool
+
+                pool = await get_arq_pool()
+                if pool is None:
+                    logger.warning(
+                        "Cannot auto-embed for project %s: ARQ/Redis pool unavailable",
+                        project_id,
+                    )
+                else:
+                    entity_iris = [
+                        event.entity_iri
+                        for event in change_events
+                        if event.event_type != ChangeEventType.DELETE
+                    ]
+                    if entity_iris:
+                        await pool.enqueue_job(
+                            "run_batch_entity_embed_task",
+                            str(project_id),
+                            current_branch,
+                            entity_iris,
+                        )
+        except Exception:
+            logger.warning("Failed to queue auto-embed", exc_info=True)
 
     return SourceContentSaveResponse(
         success=True,

@@ -34,12 +34,8 @@ docker compose up -d --force-recreate api worker
 # Start infrastructure
 docker compose -f compose.prod.yaml up -d
 
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate
-
-# Install dependencies
-pip install -e ".[dev]"
+# Install dependencies and pre-commit hooks (one command)
+make setup
 
 # Configure
 cp .env.example .env
@@ -53,6 +49,10 @@ alembic upgrade head
 # Start server
 uvicorn ontokit.main:app --reload
 ```
+
+> **Note:** `make setup` requires [uv](https://docs.astral.sh/uv/). It installs
+> all dev dependencies and sets up pre-commit hooks (ruff + mypy) so that code
+> quality checks run automatically on every commit.
 
 ## Documentation
 

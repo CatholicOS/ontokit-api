@@ -188,6 +188,9 @@ class GitHubIntegration(Base):
     # Whether GitHub webhooks are enabled for this integration
     webhooks_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # GitHub webhook hook ID (set when auto-detected or auto-created)
+    github_hook_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # Branch settings
     default_branch: Mapped[str] = mapped_column(String(255), default="main")
 

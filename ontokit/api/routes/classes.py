@@ -106,7 +106,7 @@ async def get_class_hierarchy(
     service: Annotated[OntologyService, Depends(get_ontology_service)],
     direction: str = "both",
     depth: int = 3,
-) -> dict:
+) -> dict[str, object]:
     """
     Get the class hierarchy around a specific class.
 

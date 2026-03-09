@@ -2,6 +2,7 @@
 
 import logging
 from datetime import UTC, datetime
+from typing import cast
 
 import pygit2
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -127,10 +128,14 @@ async def sync_github_project(
 
         else:
             # Diverged — attempt merge
-            merge_result = _try_merge(pygit2_repo, local_oid, remote_oid, branch)
+            local_commit_oid = cast(pygit2.Oid, local_oid)
+            remote_commit_oid = cast(pygit2.Oid, remote_oid)
+            merge_result = _try_merge(pygit2_repo, local_commit_oid, remote_commit_oid, branch)
             if merge_result["conflict"]:
                 integration.sync_status = "conflict"
-                integration.sync_error = merge_result.get("error", "Merge conflict detected")
+                integration.sync_error = cast(
+                    "str | None", merge_result.get("error", "Merge conflict detected")
+                )
                 await db.commit()
                 return {"status": "conflict", "ahead": ahead, "behind": behind}
 
@@ -184,8 +189,8 @@ def _try_merge(
         merged_tree_oid = merge_index.write_tree(repo)
 
         # Create merge commit
-        local_commit = repo.get(local_oid)
-        remote_commit = repo.get(remote_oid)
+        local_commit = cast(pygit2.Commit, repo.get(local_oid))
+        remote_commit = cast(pygit2.Commit, repo.get(remote_oid))
         sig = pygit2.Signature("OntoKit Sync", "sync@ontokit.dev")
         repo.create_commit(
             f"refs/heads/{branch}",
