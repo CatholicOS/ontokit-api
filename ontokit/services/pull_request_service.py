@@ -58,6 +58,7 @@ from ontokit.schemas.pull_request import (
     ReviewResponse,
 )
 from ontokit.services.github_service import GitHubService, get_github_service
+from ontokit.services.notification_service import NotificationService
 from ontokit.services.user_service import UserService, get_user_service
 
 logger = logging.getLogger(__name__)
@@ -288,6 +289,20 @@ class PullRequestService:
 
         await self.db.commit()
         await self.db.refresh(db_pr, ["reviews", "comments"])
+
+        # Notify project owners/admins about the new PR
+        notif = NotificationService(self.db)
+        await notif.notify_project_roles(
+            project_id=project_id,
+            project_name=project.name,
+            roles=["owner", "admin"],
+            notification_type="pr_opened",
+            title=f"PR #{pr_number}: {pr_create.title}",
+            body=pr_create.description[:200] if pr_create.description else None,
+            target_id=str(db_pr.id),
+            exclude_user_id=user.id,
+        )
+        await self.db.commit()
 
         return await self._to_pr_response(db_pr, project_id)
 
@@ -593,6 +608,19 @@ class PullRequestService:
 
         await self.db.commit()
 
+        # Notify PR author that their PR was merged
+        if pr.author_id != user.id:
+            notif = NotificationService(self.db)
+            await notif.create_notification(
+                user_id=pr.author_id,
+                notification_type="pr_merged",
+                title=f"PR #{pr_number}: {pr.title} was merged",
+                project_id=project_id,
+                project_name=project.name,
+                target_id=str(pr.id),
+            )
+            await self.db.commit()
+
         return PRMergeResponse(
             success=True,
             message="Pull request merged successfully",
@@ -661,6 +689,25 @@ class PullRequestService:
 
         await self.db.commit()
         await self.db.refresh(db_review)
+
+        # Notify PR author about the review
+        if pr.author_id != user.id:
+            status_label = {
+                "approved": "approved",
+                "changes_requested": "requested changes on",
+                "commented": "commented on",
+            }.get(review_create.status, "reviewed")
+            notif = NotificationService(self.db)
+            await notif.create_notification(
+                user_id=pr.author_id,
+                notification_type="pr_review",
+                title=f"{user.name or user.id} {status_label} PR #{pr_number}: {pr.title}",
+                body=review_create.body[:200] if review_create.body else None,
+                project_id=project_id,
+                project_name=project.name,
+                target_id=str(pr.id),
+            )
+            await self.db.commit()
 
         return self._to_review_response(db_review)
 

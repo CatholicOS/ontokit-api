@@ -12,6 +12,7 @@ repos:
       - id: mypy
         args: [--strict, --python-version=3.11]
         additional_dependencies:
+          - alembic>=1.14.0
           - fastapi>=0.115.0
           - pydantic>=2.10.0
           - pydantic-settings>=2.6.0

@@ -22,6 +22,7 @@ from ontokit.schemas.join_request import (
     PendingJoinRequestsSummary,
     ProjectPendingCount,
 )
+from ontokit.services.notification_service import NotificationService
 from ontokit.services.user_service import UserService, get_user_service
 
 logger = logging.getLogger(__name__)
@@ -150,6 +151,20 @@ class JoinRequestService:
                 detail="You already have a pending join request for this project",
             ) from exc
 
+        # Notify project owners/admins about the new join request
+        notif = NotificationService(self.db)
+        await notif.notify_project_roles(
+            project_id=project_id,
+            project_name=project.name,
+            roles=["owner", "admin"],
+            notification_type="join_request",
+            title=f"{user.name or user.id} requested to join {project.name}",
+            body=data.message[:200] if data.message else None,
+            target_id=str(jr.id),
+            exclude_user_id=user.id,
+        )
+        await self.db.commit()
+
         return self._to_response(jr)
 
     async def list_requests(
@@ -252,6 +267,20 @@ class JoinRequestService:
             await self.db.commit()
             await self.db.refresh(jr)
 
+        # Notify the requesting user that their request was approved
+        project = await self._get_project(project_id)
+        notif = NotificationService(self.db)
+        await notif.create_notification(
+            user_id=jr.user_id,
+            notification_type="join_request",
+            title=f"Your request to join {project.name} was approved",
+            body=action.response_message,
+            project_id=project_id,
+            project_name=project.name,
+            target_id=str(jr.id),
+        )
+        await self.db.commit()
+
         return self._to_response(jr)
 
     async def decline_request(
@@ -290,6 +319,20 @@ class JoinRequestService:
 
         await self.db.commit()
         await self.db.refresh(jr)
+
+        # Notify the requesting user that their request was declined
+        project = await self._get_project(project_id)
+        notif = NotificationService(self.db)
+        await notif.create_notification(
+            user_id=jr.user_id,
+            notification_type="join_request",
+            title=f"Your request to join {project.name} was declined",
+            body=action.response_message,
+            project_id=project_id,
+            project_name=project.name,
+            target_id=str(jr.id),
+        )
+        await self.db.commit()
 
         return self._to_response(jr)
 

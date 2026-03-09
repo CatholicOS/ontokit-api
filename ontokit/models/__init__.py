@@ -10,6 +10,7 @@ from ontokit.models.lint import (
     LintRun,
     LintRunStatus,
 )
+from ontokit.models.notification import Notification
 from ontokit.models.project import Project, ProjectMember
 from ontokit.models.pull_request import (
     GitHubIntegration,
@@ -35,6 +36,7 @@ __all__ = [
     "LintIssueType",
     "LintRun",
     "LintRunStatus",
+    "Notification",
     "PRStatus",
     "Project",
     "ProjectEmbeddingConfig",

@@ -35,6 +35,7 @@ from ontokit.schemas.suggestion import (
     SuggestionSubmitRequest,
     SuggestionSubmitResponse,
 )
+from ontokit.services.notification_service import NotificationService
 from ontokit.services.pull_request_service import get_pull_request_service
 
 logger = logging.getLogger(__name__)
@@ -437,6 +438,26 @@ class SuggestionService:
         session.pr_number = pr_response.pr_number
         session.pr_id = pr_response.id
         session.last_activity = datetime.now(UTC)
+
+        # Notify project editors/admins about the suggestion
+        project = await self._get_project(project_id)
+        notification_type = (
+            "suggestion_auto_submitted"
+            if new_status == SuggestionSessionStatus.AUTO_SUBMITTED.value
+            else "suggestion_submitted"
+        )
+        notif = NotificationService(self.db)
+        await notif.notify_project_roles(
+            project_id=project_id,
+            project_name=project.name,
+            roles=["owner", "admin", "editor"],
+            notification_type=notification_type,
+            title=f"Suggestion submitted: {pr_response.title[:80]}",
+            body=summary[:200] if summary else None,
+            target_id=str(pr_response.id),
+            exclude_user_id=user.id,
+        )
+
         await self.db.commit()
 
         return SuggestionSubmitResponse(
