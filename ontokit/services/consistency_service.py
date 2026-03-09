@@ -1,6 +1,7 @@
 """Consistency checking service — 12 rules for ontology quality."""
 
 import time
+from collections.abc import Iterator
 from datetime import UTC, datetime
 
 from rdflib import Graph, URIRef
@@ -15,7 +16,7 @@ _CLASS_TYPES = {OWL.Class, RDFS.Class}
 _PROPERTY_TYPES = {OWL.ObjectProperty, OWL.DatatypeProperty, OWL.AnnotationProperty, RDF.Property}
 
 
-def _iter_classes(graph: Graph):
+def _iter_classes(graph: Graph) -> Iterator[URIRef]:
     """Yield all URIRef subjects declared as any class type."""
     seen: set[URIRef] = set()
     for cls_type in _CLASS_TYPES:

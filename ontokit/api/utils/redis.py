@@ -21,5 +21,5 @@ async def close_arq_pool() -> None:
     """Close the cached ARQ Redis pool."""
     global _arq_pool
     if _arq_pool is not None:
-        await _arq_pool.aclose()
+        await _arq_pool.close()
         _arq_pool = None

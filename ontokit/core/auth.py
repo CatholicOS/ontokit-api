@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from typing import Annotated
+from typing import Annotated, Any
 
 import httpx
 from fastapi import Depends, HTTPException, status
@@ -22,7 +22,7 @@ ZITADEL_ROLES_CLAIM = "urn:zitadel:iam:org:project:roles"
 _JWKS_CACHE_TTL = 3600
 
 
-def _extract_roles(payload: dict) -> list[str]:
+def _extract_roles(payload: dict[str, Any]) -> list[str]:
     """Extract role names from the Zitadel roles claim.
 
     The Zitadel roles claim format is:
@@ -68,12 +68,12 @@ class CurrentUser(BaseModel):
 
 
 # Cache for JWKS (JSON Web Key Set) with TTL
-_jwks_cache: dict | None = None
+_jwks_cache: dict[str, Any] | None = None
 _jwks_cache_time: float = 0.0
 _jwks_lock = asyncio.Lock()
 
 
-async def get_jwks(*, force_refresh: bool = False) -> dict:
+async def get_jwks(*, force_refresh: bool = False) -> dict[str, Any]:
     """Fetch and cache the JWKS from Zitadel.
 
     The cache expires after 1 hour (controlled by _JWKS_CACHE_TTL) to handle
@@ -122,9 +122,10 @@ async def get_jwks(*, force_refresh: bool = False) -> dict:
                     )
                 resp = await client.get(jwks_uri, headers=headers)
                 resp.raise_for_status()
-                _jwks_cache = resp.json()
+                jwks_data: dict[str, Any] = resp.json()
+                _jwks_cache = jwks_data
                 _jwks_cache_time = time.monotonic()
-                return _jwks_cache
+                return jwks_data
             except httpx.HTTPError as e:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -212,7 +213,7 @@ async def validate_token(token: str) -> TokenPayload:
         ) from e
 
 
-async def fetch_userinfo(access_token: str) -> dict | None:
+async def fetch_userinfo(access_token: str) -> dict[str, Any] | None:
     """Fetch user info from Zitadel's userinfo endpoint."""
     base_url = settings.zitadel_internal_url or settings.zitadel_issuer
 
@@ -235,7 +236,8 @@ async def fetch_userinfo(access_token: str) -> dict | None:
                 timeout=10.0,
             )
             if response.status_code == 200:
-                return response.json()
+                result: dict[str, Any] = response.json()
+                return result
     except httpx.HTTPError:
         pass
 
@@ -369,6 +371,6 @@ class PermissionChecker:
         return user
 
 
-def require_roles(*roles: str):
+def require_roles(*roles: str) -> Any:
     """Dependency to require specific roles."""
     return Depends(PermissionChecker(list(roles)))

@@ -74,7 +74,8 @@ def get_cross_references(graph: Graph, target_iri: str) -> CrossReferencesRespon
             continue
 
         # Determine context from predicate
-        context = _PREDICATE_CONTEXT.get(p)
+        # Cast predicate to URIRef for typed dict lookup (p is always URIRef here)
+        context = _PREDICATE_CONTEXT.get(URIRef(str(p)))
         if context is None:
             # Only classify as annotation_value if the predicate is declared
             # as an owl:AnnotationProperty in the graph; skip other unknown

@@ -4,6 +4,7 @@ import base64
 import hashlib
 import logging
 from datetime import UTC, datetime
+from typing import cast
 from uuid import UUID
 
 from cryptography.fernet import Fernet
@@ -13,7 +14,12 @@ from rdflib.namespace import OWL, RDF, RDFS
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ontokit.models.embedding import EmbeddingJob, EntityEmbedding, ProjectEmbeddingConfig, Vector
+from ontokit.models.embedding import (
+    EmbeddingJob,
+    EntityEmbedding,
+    ProjectEmbeddingConfig,
+    Vector,
+)
 from ontokit.schemas.embeddings import (
     EmbeddingConfig,
     EmbeddingConfigUpdate,
@@ -24,7 +30,9 @@ from ontokit.schemas.embeddings import (
     SemanticSearchResult,
     SimilarEntity,
 )
+from ontokit.schemas.embeddings import EmbeddingProvider as EmbeddingProviderLiteral
 from ontokit.services.embedding_providers import get_embedding_provider
+from ontokit.services.embedding_providers.base import EmbeddingProvider as EmbeddingProviderBase
 from ontokit.services.embedding_text_builder import build_embedding_text
 from ontokit.services.rdf_utils import get_entity_type as _get_entity_type
 from ontokit.services.rdf_utils import is_deprecated as _is_deprecated
@@ -50,9 +58,9 @@ def _decrypt_secret(ciphertext: str) -> str:
     return _get_fernet().decrypt(ciphertext.encode()).decode()
 
 
-def _vec_to_str(vec) -> str:
+def _vec_to_str(vec: list[float]) -> str:
     """Convert an embedding vector to a pgvector-compatible string."""
-    return str(list(vec))
+    return str(vec)
 
 
 class EmbeddingService:
@@ -67,7 +75,7 @@ class EmbeddingService:
         if not config:
             return None
         return EmbeddingConfig(
-            provider=config.provider,
+            provider=cast(EmbeddingProviderLiteral, config.provider),
             model_name=config.model_name,
             api_key_set=config.api_key_encrypted is not None,
             dimensions=config.dimensions,
@@ -114,7 +122,7 @@ class EmbeddingService:
         await self._db.refresh(config)
 
         return EmbeddingConfig(
-            provider=config.provider,
+            provider=cast(EmbeddingProviderLiteral, config.provider),
             model_name=config.model_name,
             api_key_set=config.api_key_encrypted is not None,
             dimensions=config.dimensions,
@@ -208,7 +216,7 @@ class EmbeddingService:
             cfg.last_full_embed_at = None
         await self._db.commit()
 
-    async def _get_provider(self, project_id: UUID):
+    async def _get_provider(self, project_id: UUID) -> "EmbeddingProviderBase":
         """Get the embedding provider for a project."""
         result = await self._db.execute(
             select(ProjectEmbeddingConfig).where(ProjectEmbeddingConfig.project_id == project_id)

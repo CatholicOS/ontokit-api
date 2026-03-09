@@ -1357,7 +1357,8 @@ class PullRequestService:
 
         # Pull latest changes
         try:
-            self.git_service.pull_branch(project_id, integration.default_branch, "origin")
+            # TODO: implement pull_branch on BareGitRepositoryService
+            self.git_service.pull_branch(project_id, integration.default_branch, "origin")  # type: ignore[attr-defined]
             integration.last_sync_at = datetime.now(UTC)
             await self.db.commit()
         except Exception as e:

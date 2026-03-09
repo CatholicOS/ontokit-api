@@ -135,7 +135,7 @@ class OntologyRepository:
         return CommitInfo(
             hash=commit.hexsha,
             short_hash=commit.hexsha[:8],
-            message=commit.message.strip(),
+            message=str(commit.message).strip(),
             author_name=str(commit.author.name) if commit.author else "Unknown",
             author_email=str(commit.author.email) if commit.author else "",
             timestamp=commit.committed_datetime.isoformat(),
@@ -170,7 +170,7 @@ class OntologyRepository:
                 all_commits.sort(key=lambda c: c.committed_datetime, reverse=True)
                 commit_iter = all_commits[:limit]
             else:
-                commit_iter = self.repo.iter_commits(max_count=limit)
+                commit_iter = list(self.repo.iter_commits(max_count=limit))
 
             for commit in commit_iter:
                 # Detect merge commits (commits with multiple parents)
@@ -180,7 +180,7 @@ class OntologyRepository:
                 if is_merge:
                     # Try to extract branch name from merge commit message
                     # Common formats: "Merge branch 'feature/x'" or "Merge branch 'feature/x' into main"
-                    message = commit.message.strip()
+                    message = str(commit.message).strip()
                     match = re.search(r"Merge branch '([^']+)'", message)
                     if match:
                         merged_branch = match.group(1)
@@ -189,7 +189,7 @@ class OntologyRepository:
                     CommitInfo(
                         hash=commit.hexsha,
                         short_hash=commit.hexsha[:8],
-                        message=commit.message.strip(),
+                        message=str(commit.message).strip(),
                         author_name=str(commit.author.name) if commit.author else "Unknown",
                         author_email=str(commit.author.email) if commit.author else "",
                         timestamp=commit.committed_datetime.isoformat(),
@@ -207,7 +207,7 @@ class OntologyRepository:
         """Get file content at a specific version."""
         commit = self.repo.commit(version)
         blob = commit.tree / filepath
-        return blob.data_stream.read().decode("utf-8")
+        return str(blob.data_stream.read().decode("utf-8"))
 
     def diff_versions(self, from_version: str, to_version: str = "HEAD") -> DiffInfo:
         """Get diff between two versions with patch content and line counts."""
@@ -229,7 +229,12 @@ class OntologyRepository:
 
             if d.diff:
                 try:
-                    patch = d.diff.decode("utf-8", errors="replace")
+                    raw_diff = d.diff
+                    patch = (
+                        raw_diff.decode("utf-8", errors="replace")
+                        if isinstance(raw_diff, bytes)
+                        else str(raw_diff)
+                    )
                     # Count additions and deletions from the patch
                     for line in patch.split("\n"):
                         if line.startswith("+") and not line.startswith("+++"):
@@ -245,7 +250,7 @@ class OntologyRepository:
             changes.append(
                 FileChange(
                     path=d.b_path or d.a_path or "",
-                    change_type=d.change_type,
+                    change_type=str(d.change_type or "M"),
                     old_path=d.a_path if d.change_type == "R" else None,
                     additions=additions,
                     deletions=deletions,
@@ -266,7 +271,11 @@ class OntologyRepository:
         """List all files at a specific version."""
         try:
             commit = self.repo.commit(version)
-            return [item.path for item in commit.tree.traverse() if item.type == "blob"]
+            return [
+                str(item.path)  # type: ignore[union-attr]
+                for item in commit.tree.traverse()
+                if hasattr(item, "type") and item.type == "blob"  # type: ignore[union-attr]
+            ]
         except (ValueError, InvalidGitRepositoryError):
             return []
 
@@ -275,10 +284,10 @@ class OntologyRepository:
     def get_current_branch(self) -> str:
         """Get the name of the current branch."""
         try:
-            return self.repo.active_branch.name
+            return str(self.repo.active_branch.name)
         except TypeError:
             # Detached HEAD state
-            return self.repo.head.commit.hexsha[:8]
+            return str(self.repo.head.commit.hexsha[:8])
 
     def get_default_branch(self) -> str:
         """Get the name of the default branch (main or master)."""
@@ -287,7 +296,7 @@ class OntologyRepository:
                 return name
         # Return first branch if neither main nor master exists
         if self.repo.branches:
-            return self.repo.branches[0].name
+            return str(self.repo.branches[0].name)
         return "main"
 
     def list_branches(self) -> list[BranchInfo]:
@@ -322,7 +331,7 @@ class OntologyRepository:
                     is_current=branch.name == current_branch,
                     is_default=branch.name == default_branch,
                     commit_hash=commit.hexsha,
-                    commit_message=commit.message.strip().split("\n")[0],
+                    commit_message=str(commit.message).strip().split("\n")[0],
                     commit_date=commit.committed_datetime,
                     commits_ahead=commits_ahead,
                     commits_behind=commits_behind,
@@ -350,7 +359,7 @@ class OntologyRepository:
             is_current=False,
             is_default=False,
             commit_hash=commit.hexsha,
-            commit_message=commit.message.strip().split("\n")[0],
+            commit_message=str(commit.message).strip().split("\n")[0],
             commit_date=commit.committed_datetime,
         )
 
@@ -386,7 +395,7 @@ class OntologyRepository:
             is_current=True,
             is_default=name == default_branch,
             commit_hash=commit.hexsha,
-            commit_message=commit.message.strip().split("\n")[0],
+            commit_message=str(commit.message).strip().split("\n")[0],
             commit_date=commit.committed_datetime,
             commits_ahead=commits_ahead,
             commits_behind=commits_behind,
@@ -498,7 +507,7 @@ class OntologyRepository:
                 return MergeResult(
                     success=False,
                     message="Merge failed due to conflicts",
-                    conflicts=list(conflicts),
+                    conflicts=[str(c) for c in conflicts],
                 )
 
         finally:
@@ -529,7 +538,7 @@ class OntologyRepository:
 
                 if is_merge:
                     # Try to extract branch name from merge commit message
-                    message = commit.message.strip()
+                    message = str(commit.message).strip()
                     match = re.search(r"Merge branch '([^']+)'", message)
                     if match:
                         merged_branch = match.group(1)
@@ -538,7 +547,7 @@ class OntologyRepository:
                     CommitInfo(
                         hash=commit.hexsha,
                         short_hash=commit.hexsha[:8],
-                        message=commit.message.strip(),
+                        message=str(commit.message).strip(),
                         author_name=str(commit.author.name) if commit.author else "Unknown",
                         author_email=str(commit.author.email) if commit.author else "",
                         timestamp=commit.committed_datetime.isoformat(),
@@ -567,7 +576,7 @@ class OntologyRepository:
         try:
             if name in [r.name for r in self.repo.remotes]:
                 # Update existing remote
-                self.repo.delete_remote(name)
+                self.repo.delete_remote(self.repo.remote(name))
             self.repo.create_remote(name, url)
             return True
         except GitCommandError:
@@ -584,7 +593,7 @@ class OntologyRepository:
             True if remote was removed successfully
         """
         try:
-            self.repo.delete_remote(name)
+            self.repo.delete_remote(self.repo.remote(name))
             return True
         except GitCommandError:
             return False

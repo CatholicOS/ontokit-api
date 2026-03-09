@@ -3,6 +3,7 @@
 import logging
 import time
 import uuid
+from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
@@ -55,7 +56,7 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Add standard security headers to every response."""
 
-    def __init__(self, app, *, is_production: bool = False) -> None:  # type: ignore[override]
+    def __init__(self, app: Any, *, is_production: bool = False) -> None:
         super().__init__(app)
         self.is_production = is_production
 

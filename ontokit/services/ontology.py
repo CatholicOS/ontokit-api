@@ -1,7 +1,7 @@
 """Ontology service for managing OWL ontologies."""
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 from typing import Literal as TypingLiteral
 from uuid import UUID
 
@@ -524,7 +524,9 @@ class OntologyService:
                     EntitySearchResult(
                         iri=iri_str,
                         label=display_label,
-                        entity_type=entity_type,
+                        entity_type=cast(
+                            TypingLiteral["class", "property", "individual"], entity_type
+                        ),
                         deprecated=deprecated,
                     )
                 )
@@ -871,7 +873,7 @@ class OntologyService:
                 )
 
         return OWLClassResponse(
-            iri=str(class_uri),
+            iri=str(class_uri),  # type: ignore[arg-type]  # Pydantic coerces str to HttpUrl
             labels=labels,
             comments=comments,
             deprecated=deprecated,

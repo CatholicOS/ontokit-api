@@ -55,6 +55,7 @@ dev = [
     "httpx>=0.28.0",
     "ruff>=0.8.0",
     "mypy>=1.13.0",
+    "types-python-jose>=3.3.0",
     "pre-commit>=4.0.0",
 ]
 
@@ -103,6 +104,12 @@ python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_ignores = true
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 _models: dict[str, object] = {}
 
 
-def _get_model(model_name: str):
+def _get_model(model_name: str) -> object:
     """Get or load a sentence-transformers model (cached)."""
     if model_name not in _models:
         from sentence_transformers import SentenceTransformer
@@ -30,7 +30,7 @@ class LocalEmbeddingProvider(EmbeddingProvider):
     def dimensions(self) -> int:
         if self._dims is None:
             model = _get_model(self._model_name)
-            self._dims = model.get_sentence_embedding_dimension()  # type: ignore[union-attr]
+            self._dims = model.get_sentence_embedding_dimension()  # type: ignore[attr-defined]
         return self._dims
 
     @property
@@ -46,9 +46,9 @@ class LocalEmbeddingProvider(EmbeddingProvider):
         return results[0]
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        def _encode():
+        def _encode() -> list[list[float]]:
             model = _get_model(self._model_name)
-            embeddings = model.encode(texts, batch_size=64, show_progress_bar=False)  # type: ignore[union-attr]
+            embeddings = model.encode(texts, batch_size=64, show_progress_bar=False)  # type: ignore[attr-defined]
             return [emb.tolist() for emb in embeddings]
 
         return await asyncio.to_thread(_encode)

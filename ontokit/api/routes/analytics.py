@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ontokit.core.auth import OptionalUser
+from ontokit.core.auth import CurrentUser, OptionalUser
 from ontokit.core.database import get_db
 from ontokit.schemas.analytics import (
     ContributorStats,
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def _verify_access(project_id: UUID, db: AsyncSession, user):
+async def _verify_access(project_id: UUID, db: AsyncSession, user: CurrentUser | None) -> None:
     from fastapi import HTTPException
 
     service = get_project_service(db)

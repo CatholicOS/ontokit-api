@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ontokit.api.utils.redis import get_arq_pool
-from ontokit.core.auth import RequiredUser
+from ontokit.core.auth import CurrentUser, RequiredUser
 from ontokit.core.database import get_db
 from ontokit.git import get_git_service
 from ontokit.models.embedding import EmbeddingJob
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def _verify_write_access(project_id: UUID, db: AsyncSession, user):
+async def _verify_write_access(project_id: UUID, db: AsyncSession, user: CurrentUser) -> None:
     service = get_project_service(db)
     project_response = await service.get(project_id, user)
     if project_response.user_role not in ("owner", "admin", "editor"):

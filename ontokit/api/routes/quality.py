@@ -6,10 +6,12 @@ from typing import Annotated
 from urllib.parse import unquote
 from uuid import UUID
 
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from rdflib import Graph
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ontokit.core.auth import OptionalUser, RequiredUser
+from ontokit.core.auth import CurrentUser, OptionalUser, RequiredUser
 from ontokit.core.database import get_db
 from ontokit.schemas.quality import (
     ConsistencyCheckResult,
@@ -26,7 +28,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _get_redis():
+def _get_redis() -> aioredis.Redis:
     """Get the shared Redis connection pool from the application lifespan."""
     from ontokit.main import redis_pool
 
@@ -35,7 +37,7 @@ def _get_redis():
     return redis_pool
 
 
-async def _load_graph(project_id: UUID, branch: str | None, db: AsyncSession):
+async def _load_graph(project_id: UUID, branch: str | None, db: AsyncSession) -> Graph:
     """Load the ontology graph for a project, ensuring it's in memory."""
     from sqlalchemy import select
 
@@ -78,7 +80,7 @@ async def _load_graph(project_id: UUID, branch: str | None, db: AsyncSession):
     return await ontology._get_graph(project_id, branch)
 
 
-async def _verify_access(project_id: UUID, db: AsyncSession, user):
+async def _verify_access(project_id: UUID, db: AsyncSession, user: CurrentUser | None) -> None:
     """Verify project access using the lint module's pattern."""
     from ontokit.services.project_service import get_project_service
 
@@ -118,7 +120,7 @@ async def trigger_consistency_check(
     await _verify_access(project_id, db, user)
     graph = await _load_graph(project_id, branch, db)
 
-    result = run_consistency_check(graph, str(project_id), branch)
+    result = run_consistency_check(graph, str(project_id), branch or "main")
 
     # Cache in Redis with 10-min TTL
     job_id = str(uuid.uuid4())
@@ -189,7 +191,7 @@ async def get_consistency_issues(
 
     return ConsistencyCheckResult(
         project_id=str(project_id),
-        branch=branch,
+        branch=branch or "main",
         issues=[],
         checked_at=datetime.now(UTC).isoformat(),
         duration_ms=0,

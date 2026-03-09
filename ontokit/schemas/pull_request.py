@@ -1,7 +1,7 @@
 """Pull request, review, comment, branch, and GitHub integration schemas."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -307,22 +307,22 @@ class GitHubWebhookPayload(BaseModel):
     """Base schema for GitHub webhook payloads."""
 
     action: str
-    repository: dict | None = None
-    sender: dict | None = None
+    repository: dict[str, Any] | None = None
+    sender: dict[str, Any] | None = None
 
 
 class GitHubPRWebhookPayload(GitHubWebhookPayload):
     """Schema for GitHub pull_request webhook payloads."""
 
     number: int
-    pull_request: dict
+    pull_request: dict[str, Any]
 
 
 class GitHubReviewWebhookPayload(GitHubWebhookPayload):
     """Schema for GitHub pull_request_review webhook payloads."""
 
-    review: dict
-    pull_request: dict
+    review: dict[str, Any]
+    pull_request: dict[str, Any]
 
 
 class GitHubPushWebhookPayload(GitHubWebhookPayload):
@@ -331,7 +331,7 @@ class GitHubPushWebhookPayload(GitHubWebhookPayload):
     ref: str
     before: str
     after: str
-    commits: list[dict] = []
+    commits: list[dict[str, Any]] = []
 
 
 # Commit Schemas (for PR commit list)

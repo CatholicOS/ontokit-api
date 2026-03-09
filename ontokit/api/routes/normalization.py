@@ -46,7 +46,7 @@ class JobStatusResponse(BaseModel):
 
     job_id: str
     status: str  # "pending", "running", "complete", "failed", "not_found"
-    result: dict | None = None
+    result: dict[str, object] | None = None
     error: str | None = None
 
 

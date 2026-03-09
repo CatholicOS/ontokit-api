@@ -90,7 +90,7 @@ def find_duplicates(graph: Graph, threshold: float = 0.85) -> DuplicateDetection
                 elif rev_key in pair_sim:
                     sim = pair_sim[rev_key]
                 else:
-                    sim = None
+                    continue
                 if sim is not None:
                     sims.append(sim)
         avg_sim = sum(sims) / len(sims) if sims else threshold

@@ -21,6 +21,12 @@ repos:
           - arq>=0.26.0
           - httpx>=0.28.0
           - python-jose[cryptography]>=3.3.0
+          - types-python-jose>=3.3.0
           - pygit2>=1.13.0
+          - gitpython>=3.1.0
           - minio>=7.2.0
-          - types-redis
+          - slowapi>=0.1.9
+          - numpy>=1.26.0
+          - pgvector>=0.3.0
+          - sentence-transformers>=3.0.0
+          - cryptography>=42.0.0

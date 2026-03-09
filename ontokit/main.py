@@ -52,11 +52,12 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 
     # --- Redis --------------------------------------------------------------
     try:
-        redis_pool = aioredis.from_url(
+        pool = aioredis.from_url(  # type: ignore[no-untyped-call]
             str(settings.redis_url),
             decode_responses=True,
         )
-        await redis_pool.ping()
+        await pool.ping()
+        redis_pool = pool
         logger.info("Redis connection verified")
     except Exception:
         logger.exception("Failed to connect to Redis — continuing startup")
@@ -80,7 +81,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # Close Redis
     if redis_pool is not None:
         try:
-            await redis_pool.aclose()
+            await redis_pool.close()
             logger.info("Redis connection closed")
         except Exception:
             logger.exception("Error closing Redis connection")
@@ -143,9 +144,10 @@ app.add_middleware(RequestIDMiddleware)
 def _error_response(
     status_code: int, code: str, message: str, detail: object = None
 ) -> JSONResponse:
-    body: dict = {"error": {"code": code, "message": message}}
+    error: dict[str, object] = {"code": code, "message": message}
     if detail is not None:
-        body["error"]["detail"] = detail
+        error["detail"] = detail
+    body: dict[str, object] = {"error": error}
     return JSONResponse(status_code=status_code, content=body)
 
 

@@ -234,7 +234,7 @@ async def create_project_from_github(
     default_branch = data.default_branch
     if not default_branch:
         repo_info = await github.get_repo_info(pat, data.repo_owner, data.repo_name)
-        default_branch = repo_info.get("default_branch", "main")
+        default_branch = repo_info.get("default_branch") or "main"
 
     # Download the ontology file from GitHub
     try:

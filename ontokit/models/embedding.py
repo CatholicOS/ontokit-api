@@ -1,5 +1,7 @@
 """Embedding models for vector search and similarity."""
 
+__all__ = ["EmbeddingJob", "EntityEmbedding", "ProjectEmbeddingConfig", "Vector"]
+
 import uuid
 from datetime import datetime
 from typing import Any
@@ -21,9 +23,9 @@ from ontokit.core.database import Base
 
 # Import Vector conditionally to avoid hard failure if pgvector not installed
 try:
-    from pgvector.sqlalchemy import Vector
+    from pgvector.sqlalchemy import Vector  # type: ignore
 except ImportError:
-    Vector = None  # type: ignore[assignment,misc]
+    Vector = None  # noqa: N806
 
 
 class ProjectEmbeddingConfig(Base):

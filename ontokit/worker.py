@@ -93,15 +93,15 @@ async def run_lint_task(
         lint_results: list[LintResult] = await linter.lint(graph, project_uuid)
 
         # Save issues to database
-        for result in lint_results:
+        for lint_result in lint_results:
             issue = LintIssue(
                 run_id=run_id,
                 project_id=project_uuid,
-                issue_type=result.issue_type,
-                rule_id=result.rule_id,
-                message=result.message,
-                subject_iri=result.subject_iri,
-                details=result.details,
+                issue_type=lint_result.issue_type,
+                rule_id=lint_result.rule_id,
+                message=lint_result.message,
+                subject_iri=lint_result.subject_iri,
+                details=lint_result.details,
             )
             db.add(issue)
 
@@ -279,7 +279,7 @@ async def run_normalization_task(
 
         run, original_content, normalized_content = await norm_service.run_normalization(
             project=project,
-            user=user,
+            user=user,  # type: ignore[arg-type]
             trigger_type="manual",
             dry_run=dry_run,
         )

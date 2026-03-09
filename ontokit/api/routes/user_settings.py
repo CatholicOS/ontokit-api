@@ -199,8 +199,8 @@ async def search_users(
 
     items = [
         UserSearchResult(
-            id=r.get("id", ""),
-            username=r.get("username", ""),
+            id=r.get("id") or "",
+            username=r.get("username") or "",
             display_name=r.get("display_name"),
             email=r.get("email"),
         )

@@ -7,7 +7,11 @@ import os
 import secrets
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from ontokit.models.pull_request import PullRequest
 
 from fastapi import HTTPException, status
 from sqlalchemy import select, update
@@ -129,7 +133,7 @@ class SuggestionService:
         if not session.entities_modified:
             return []
         try:
-            return json.loads(session.entities_modified)
+            return json.loads(session.entities_modified)  # type: ignore[no-any-return]
         except (json.JSONDecodeError, TypeError):
             return []
 
@@ -270,7 +274,7 @@ class SuggestionService:
             # Commit to the suggestion branch
             commit_message = f"Update {data.entity_label}"
             try:
-                commit_info = self.git_service.commit_to_branch(
+                commit_info = self.git_service.commit_to_branch(  # type: ignore[attr-defined]
                     project_id=project_id,
                     branch_name=session.branch,
                     ontology_content=data.content.encode("utf-8"),
@@ -410,7 +414,7 @@ class SuggestionService:
             # If the user doesn't have editor role for PR creation,
             # fall back to creating the PR directly
             if e.status_code == status.HTTP_403_FORBIDDEN:
-                pr_response = await self._create_pr_directly(project_id, pr_create, session)
+                pr_response = await self._create_pr_directly(project_id, pr_create, session)  # type: ignore[assignment]
             else:
                 raise
 
@@ -432,7 +436,7 @@ class SuggestionService:
         project_id: UUID,
         pr_create: PRCreate,
         session: SuggestionSession,
-    ):
+    ) -> "PullRequest":
         """Create a PR record directly when the user lacks editor role."""
         from sqlalchemy import func as sa_func
 
@@ -578,7 +582,7 @@ class SuggestionService:
         async with _branch_locks[session.branch]:
             # Commit without full validation (speed over correctness for beacon)
             try:
-                self.git_service.commit_to_branch(
+                self.git_service.commit_to_branch(  # type: ignore[attr-defined]
                     project_id=project_id,
                     branch_name=session.branch,
                     ontology_content=data.content.encode("utf-8"),
@@ -626,7 +630,7 @@ class SuggestionService:
                 )
                 .values(status=SuggestionSessionStatus.AUTO_SUBMITTED.value)
             )
-            if claim_result.rowcount != 1:
+            if claim_result.rowcount != 1:  # type: ignore[attr-defined]
                 continue  # Another worker already claimed this session
             await self.db.commit()
             # Refresh so the in-memory object reflects the new status

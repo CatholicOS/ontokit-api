@@ -9,7 +9,7 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import pygit2
@@ -156,7 +156,7 @@ class BareOntologyRepository:
 
         # Try as partial hash
         try:
-            for commit in self.repo.walk(self.repo.head.target, pygit2.GIT_SORT_TIME):
+            for commit in self.repo.walk(self.repo.head.target, pygit2.GIT_SORT_TIME):  # type: ignore[arg-type]
                 if str(commit.id).startswith(ref):
                     return commit
         except Exception:
@@ -259,7 +259,7 @@ class BareOntologyRepository:
             parents,
         )
 
-        commit = self.repo.get(commit_id)
+        commit = cast(pygit2.Commit, self.repo.get(commit_id))
         return self._commit_to_info(commit)
 
     def _add_nested_blob(
@@ -291,12 +291,17 @@ class BareOntologyRepository:
 
         # Build subtree
         subtree_builder = (
-            self.repo.TreeBuilder(existing_subtree) if existing_subtree else self.repo.TreeBuilder()
+            self.repo.TreeBuilder(cast(pygit2.Tree, existing_subtree))
+            if existing_subtree
+            else self.repo.TreeBuilder()
         )
 
         # Recursively add to subtree
         subtree_builder = self._add_nested_blob(
-            subtree_builder, existing_subtree, remaining_parts, blob_id
+            subtree_builder,
+            cast(pygit2.Tree, existing_subtree) if existing_subtree else None,
+            remaining_parts,
+            blob_id,
         )
 
         # Write subtree and add to parent
@@ -327,11 +332,11 @@ class BareOntologyRepository:
             entry = current[part]
             if i == len(parts) - 1:
                 # Last part - should be a blob
-                blob = self.repo.get(entry.id)
+                blob = cast(pygit2.Blob, self.repo.get(entry.id))
                 return blob.data
             else:
                 # Intermediate part - should be a tree
-                current = self.repo.get(entry.id)
+                current = cast(pygit2.Tree, self.repo.get(entry.id))
 
         raise FileNotFoundError(f"File not found: {filepath}")
 
@@ -356,7 +361,7 @@ class BareOntologyRepository:
                 for ref_name in self.repo.references:
                     if ref_name.startswith("refs/heads/"):
                         ref = self.repo.references[ref_name]
-                        for commit in self.repo.walk(ref.target, pygit2.GIT_SORT_TIME):
+                        for commit in self.repo.walk(ref.target, pygit2.GIT_SORT_TIME):  # type: ignore[arg-type]
                             commit_hash = str(commit.id)
                             if commit_hash not in seen_hashes:
                                 seen_hashes.add(commit_hash)
@@ -374,7 +379,7 @@ class BareOntologyRepository:
                     target = self.repo.head.target
 
                 commit_iter = []
-                for count, commit in enumerate(self.repo.walk(target, pygit2.GIT_SORT_TIME)):
+                for count, commit in enumerate(self.repo.walk(target, pygit2.GIT_SORT_TIME)):  # type: ignore[arg-type]
                     commit_iter.append(commit)
                     if count + 1 >= limit:
                         break
@@ -397,7 +402,7 @@ class BareOntologyRepository:
         from_commit = self._resolve_ref(from_version)
         to_commit = self._resolve_ref(to_version)
 
-        diff = self.repo.diff(from_commit.tree, to_commit.tree)
+        diff = self.repo.diff(from_commit.tree, to_commit.tree)  # type: ignore[call-overload]
 
         changes: list[FileChange] = []
         total_additions = 0
@@ -459,11 +464,12 @@ class BareOntologyRepository:
 
             def walk_tree(tree: pygit2.Tree, prefix: str = "") -> None:
                 for entry in tree:
-                    path = f"{prefix}{entry.name}" if prefix else entry.name
+                    name = entry.name or ""
+                    path = f"{prefix}{name}" if prefix else name
                     if entry.type == pygit2.GIT_OBJECT_BLOB:
                         files.append(path)
                     elif entry.type == pygit2.GIT_OBJECT_TREE:
-                        subtree = self.repo.get(entry.id)
+                        subtree = cast(pygit2.Tree, self.repo.get(entry.id))
                         walk_tree(subtree, f"{path}/")
 
             walk_tree(commit.tree)
@@ -616,8 +622,8 @@ class BareOntologyRepository:
         # If HEAD points to the branch being deleted, reset to default
         try:
             if self.repo.head.name == ref_name:
-                default_ref = f"refs/heads/{self.get_default_branch()}"
-                self.repo.set_head(default_ref)
+                default_ref_str = f"refs/heads/{self.get_default_branch()}"
+                self.repo.set_head(default_ref_str)
         except Exception:
             pass
 
@@ -728,10 +734,10 @@ class BareOntologyRepository:
 
             # Get commits reachable from to_ref but not from from_ref
             from_ancestors = set()
-            for commit in self.repo.walk(from_commit.id, pygit2.GIT_SORT_TIME):
+            for commit in self.repo.walk(from_commit.id, pygit2.GIT_SORT_TIME):  # type: ignore[arg-type]
                 from_ancestors.add(str(commit.id))
 
-            for commit in self.repo.walk(to_commit.id, pygit2.GIT_SORT_TIME):
+            for commit in self.repo.walk(to_commit.id, pygit2.GIT_SORT_TIME):  # type: ignore[arg-type]
                 if str(commit.id) in from_ancestors:
                     break
                 commits.append(self._commit_to_info(commit))
@@ -765,7 +771,9 @@ class BareOntologyRepository:
 
     def list_remotes(self) -> list[dict[str, str]]:
         """List all remotes."""
-        return [{"name": remote.name, "url": remote.url} for remote in self.repo.remotes]
+        return [
+            {"name": remote.name or "", "url": remote.url or ""} for remote in self.repo.remotes
+        ]
 
     def push(
         self,

@@ -188,7 +188,7 @@ class JoinRequestService:
         user_info: dict[str, dict[str, str | None]] = {}
         if responder_ids:
             info = await self.user_service.get_users_info(responder_ids)
-            user_info = {uid: dict(uinfo) for uid, uinfo in info.items()}
+            user_info = {uid: dict(uinfo) for uid, uinfo in info.items()}  # type: ignore[arg-type]
 
         return JoinRequestListResponse(
             items=[self._to_response(jr, user_info) for jr in requests],

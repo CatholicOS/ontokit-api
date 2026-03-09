@@ -712,15 +712,15 @@ class OntologyLinter:
 
             for val in graph.objects(restriction, OWL.maxCardinality):
                 with contextlib.suppress(ValueError, TypeError):
-                    max_cardinality = int(val)
+                    max_cardinality = int(str(val))
 
             for val in graph.objects(restriction, OWL.minCardinality):
                 with contextlib.suppress(ValueError, TypeError):
-                    min_cardinality = int(val)
+                    min_cardinality = int(str(val))
 
             for val in graph.objects(restriction, OWL.cardinality):
                 with contextlib.suppress(ValueError, TypeError):
-                    exact_cardinality = int(val)
+                    exact_cardinality = int(str(val))
 
             if on_property is None:
                 continue

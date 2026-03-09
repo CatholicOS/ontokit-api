@@ -93,7 +93,7 @@ class GitHubService:
             if response.status_code == 204:
                 return {}
 
-            return response.json()
+            return response.json()  # type: ignore[no-any-return]
 
     # User / Token Validation
 

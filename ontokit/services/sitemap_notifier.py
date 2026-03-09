@@ -24,7 +24,7 @@ async def notify_sitemap_add(project_id: UUID, lastmod: datetime | None = None) 
     if not _is_configured():
         return
 
-    payload: dict = {
+    payload: dict[str, str] = {
         "secret": settings.revalidation_secret,
         "action": "add",
         "url": f"/projects/{project_id}",
@@ -48,7 +48,7 @@ async def notify_sitemap_remove(project_id: UUID) -> None:
     await _post(payload)
 
 
-async def _post(payload: dict) -> None:
+async def _post(payload: dict[str, str]) -> None:
     """POST to the frontend sitemap revalidation endpoint. Logs warnings on failure."""
     url = f"{settings.frontend_url}/api/sitemap"
     try:

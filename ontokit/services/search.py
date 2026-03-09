@@ -6,7 +6,7 @@ import time
 
 from rdflib import BNode, Graph, Literal, URIRef
 from rdflib.plugins.sparql.parser import parseQuery
-from rdflib.plugins.sparql.processor import SPARQLResult
+from rdflib.query import ResultRow
 from sqlalchemy import String, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -224,7 +224,7 @@ class SearchService:
             raise ValueError(f"Invalid SPARQL query: {exc}") from exc
 
         try:
-            result: SPARQLResult = graph.query(query_text)
+            result = graph.query(query_text)
         except Exception as exc:
             logger.warning("SPARQL query execution failed: %s", exc)
             raise ValueError(f"SPARQL query execution failed: {exc}") from exc
@@ -237,12 +237,13 @@ class SearchService:
             bindings: list[dict[str, SPARQLBinding]] = []
 
             for row in result:
+                assert isinstance(row, ResultRow)
                 binding_row: dict[str, SPARQLBinding] = {}
                 for idx, var in enumerate(variables):
                     value = row[idx]
                     if value is None:
                         continue
-                    binding_row[var] = _rdf_term_to_binding(value)
+                    binding_row[var] = _rdf_term_to_binding(value)  # type: ignore[arg-type]
                 bindings.append(binding_row)
 
             return SPARQLResponse(

@@ -34,7 +34,7 @@ class NormalizationReport:
     format_converted: bool
     notes: list[str]
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, object]:
         """Convert to dictionary for JSON serialization."""
         return {
             "original_format": self.original_format,
@@ -242,9 +242,10 @@ class OntologyMetadataExtractor:
         base_iri = self._find_ontology_iri(output_graph)
 
         # Serialize to Turtle (canonical format)
-        normalized = output_graph.serialize(format="turtle", base=base_iri)
-        if isinstance(normalized, str):
-            normalized = normalized.encode("utf-8")
+        normalized_raw = output_graph.serialize(format="turtle", base=base_iri)
+        normalized: bytes = (
+            normalized_raw.encode("utf-8") if isinstance(normalized_raw, str) else normalized_raw
+        )
 
         # Parse the normalized output to get actual prefixes used
         normalized_graph = Graph()
@@ -373,9 +374,9 @@ class OntologyMetadataExtractor:
                         return value
 
         # If no ontology IRI, search globally for any title on owl:Ontology subjects
-        for subject in graph.subjects(RDF.type, OWL.Ontology):
+        for ont_subject in graph.subjects(RDF.type, OWL.Ontology):
             for prop in title_properties:
-                for obj in graph.objects(subject, prop):
+                for obj in graph.objects(ont_subject, prop):
                     value = str(obj)
                     if value:
                         return value
@@ -404,9 +405,9 @@ class OntologyMetadataExtractor:
                         return value
 
         # If no ontology IRI, search globally for any description on owl:Ontology subjects
-        for subject in graph.subjects(RDF.type, OWL.Ontology):
+        for ont_subject in graph.subjects(RDF.type, OWL.Ontology):
             for prop in desc_properties:
-                for obj in graph.objects(subject, prop):
+                for obj in graph.objects(ont_subject, prop):
                     value = str(obj)
                     if value:
                         return value
@@ -626,9 +627,9 @@ class OntologyMetadataUpdater:
                     )
                 else:
                     graph.add((ontology_iri, desc_prop.property_uri, Literal(new_description)))
-                old_val = desc_prop.current_value
-                if old_val and len(old_val) > 50:
-                    old_val = old_val[:50] + "..."
+                old_desc = desc_prop.current_value
+                if old_desc and len(old_desc) > 50:
+                    old_desc = old_desc[:50] + "..."
                 changes.append(f"Description ({desc_prop.property_curie}): updated")
             else:
                 # No existing description property - add dc:description
@@ -637,9 +638,10 @@ class OntologyMetadataUpdater:
                 changes.append("Description (dc:description): added")
 
         # Serialize to Turtle (canonical format), preserving @base directive
-        updated_content = graph.serialize(format="turtle", base=str(ontology_iri))
-        if isinstance(updated_content, str):
-            updated_content = updated_content.encode("utf-8")
+        updated_raw = graph.serialize(format="turtle", base=str(ontology_iri))
+        updated_content: bytes = (
+            updated_raw.encode("utf-8") if isinstance(updated_raw, str) else updated_raw
+        )
 
         return updated_content, changes
 

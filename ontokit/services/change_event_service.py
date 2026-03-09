@@ -2,6 +2,7 @@
 
 import logging
 from datetime import UTC, datetime, timedelta
+from typing import Literal, cast
 from uuid import UUID
 
 from rdflib import Graph, URIRef
@@ -62,8 +63,8 @@ class ChangeEventService:
         user_name: str | None = None,
         commit_hash: str | None = None,
         changed_fields: list[str] | None = None,
-        old_values: dict | None = None,
-        new_values: dict | None = None,
+        old_values: dict[str, object] | None = None,
+        new_values: dict[str, object] | None = None,
     ) -> EntityChangeEvent:
         event = EntityChangeEvent(
             project_id=project_id,
@@ -134,8 +135,8 @@ class ChangeEventService:
             uri = URIRef(iri)
             etype = new_entities[iri]
             changed_fields: list[str] = []
-            old_vals: dict = {}
-            new_vals: dict = {}
+            old_vals: dict[str, object] = {}
+            new_vals: dict[str, object] = {}
 
             # Check labels
             old_labels = _get_labels(old_graph, uri) if old_graph else []
@@ -243,7 +244,10 @@ class ChangeEventService:
                 branch=r.branch,
                 entity_iri=r.entity_iri,
                 entity_type=r.entity_type,
-                event_type=r.event_type,
+                event_type=cast(
+                    Literal["create", "update", "delete", "rename", "reparent", "deprecate"],
+                    r.event_type,
+                ),
                 user_id=r.user_id,
                 user_name=r.user_name,
                 commit_hash=r.commit_hash,
