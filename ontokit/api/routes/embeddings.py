@@ -6,7 +6,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -129,13 +129,18 @@ async def generate_embeddings(
             detail="Embedding generation already in progress",
         ) from None
 
-    pool = await get_arq_pool()
-    await pool.enqueue_job(
-        "run_embedding_generation_task",
-        str(project_id),
-        resolved_branch,
-        str(job_id),
-    )
+    try:
+        pool = await get_arq_pool()
+        await pool.enqueue_job(
+            "run_embedding_generation_task",
+            str(project_id),
+            resolved_branch,
+            str(job_id),
+        )
+    except Exception:
+        await db.execute(delete(EmbeddingJob).where(EmbeddingJob.id == job_id))
+        await db.commit()
+        raise
     return EmbeddingGenerateResponse(job_id=str(job_id))
 
 
