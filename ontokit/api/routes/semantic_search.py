@@ -43,14 +43,19 @@ async def semantic_search(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: OptionalUser,
     q: str = Query(..., min_length=1, description="Search query"),
-    branch: str = Query(default="main"),
+    branch: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     threshold: float = Query(default=0.3, ge=0.0, le=1.0),
 ) -> SemanticSearchResponse:
     """Search entities using semantic similarity."""
     await _verify_access(project_id, db, user)
+    resolved_branch = branch
+    if not resolved_branch:
+        from ontokit.git import get_git_service
+
+        resolved_branch = get_git_service().get_default_branch(project_id)
     service = EmbeddingService(db)
-    return await service.semantic_search(project_id, branch, q, limit, threshold)
+    return await service.semantic_search(project_id, resolved_branch, q, limit, threshold)
 
 
 @router.get(
@@ -62,15 +67,20 @@ async def find_similar_entities(
     iri: str,
     db: Annotated[AsyncSession, Depends(get_db)],
     user: OptionalUser,
-    branch: str = Query(default="main"),
+    branch: str | None = Query(default=None),
     limit: int = Query(default=10, ge=1, le=50),
     threshold: float = Query(default=0.5, ge=0.0, le=1.0),
 ) -> list[SimilarEntity]:
     """Find entities similar to a given entity."""
     await _verify_access(project_id, db, user)
+    resolved_branch = branch
+    if not resolved_branch:
+        from ontokit.git import get_git_service
+
+        resolved_branch = get_git_service().get_default_branch(project_id)
     decoded_iri = unquote(iri)
     service = EmbeddingService(db)
-    return await service.find_similar(project_id, branch, decoded_iri, limit, threshold)
+    return await service.find_similar(project_id, resolved_branch, decoded_iri, limit, threshold)
 
 
 @router.post(
