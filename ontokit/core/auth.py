@@ -73,23 +73,30 @@ _jwks_cache_time: float = 0.0
 _jwks_lock = asyncio.Lock()
 
 
-async def get_jwks() -> dict:
+async def get_jwks(*, force_refresh: bool = False) -> dict:
     """Fetch and cache the JWKS from Zitadel.
 
     The cache expires after 1 hour (controlled by _JWKS_CACHE_TTL) to handle
     key rotation while avoiding excessive network requests. Uses double-checked
     locking to prevent cache stampede from concurrent requests.
+
+    Args:
+        force_refresh: If True, bypass the cache TTL and fetch fresh keys.
     """
     global _jwks_cache, _jwks_cache_time
 
     now = time.monotonic()
-    if _jwks_cache is not None and (now - _jwks_cache_time) < _JWKS_CACHE_TTL:
+    if not force_refresh and _jwks_cache is not None and (now - _jwks_cache_time) < _JWKS_CACHE_TTL:
         return _jwks_cache
 
     async with _jwks_lock:
         # Re-check after acquiring lock — another coroutine may have refreshed
         now = time.monotonic()
-        if _jwks_cache is not None and (now - _jwks_cache_time) < _JWKS_CACHE_TTL:
+        if (
+            not force_refresh
+            and _jwks_cache is not None
+            and (now - _jwks_cache_time) < _JWKS_CACHE_TTL
+        ):
             return _jwks_cache
 
         # Build headers - if using internal URL, set Host header to match external domain
@@ -152,6 +159,14 @@ async def validate_token(token: str) -> TokenPayload:
             if key.get("kid") == kid:
                 rsa_key = key
                 break
+
+        if rsa_key is None:
+            # Key rotation: refresh JWKS once and retry the kid lookup
+            jwks = await get_jwks(force_refresh=True)
+            for key in jwks.get("keys", []):
+                if key.get("kid") == kid:
+                    rsa_key = key
+                    break
 
         if rsa_key is None:
             raise HTTPException(
