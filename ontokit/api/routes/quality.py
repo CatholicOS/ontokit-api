@@ -67,8 +67,8 @@ async def _load_graph(project_id: UUID, branch: str, db: AsyncSession):
         )
         try:
             await ontology.load_from_git(project_id, branch, filename, git)
-        except Exception:
-            # Fall back to storage
+        except (FileNotFoundError, KeyError, ValueError):
+            # Branch or file not in git — fall back to storage snapshot
             await ontology.load_from_storage(project_id, project.source_file_path, branch)
 
     return await ontology._get_graph(project_id, branch)
