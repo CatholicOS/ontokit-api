@@ -187,9 +187,17 @@ class SuggestionService:
             branch=branch,
             beacon_token=beacon_token,
         )
-        self.db.add(db_session)
-        await self.db.commit()
-        await self.db.refresh(db_session)
+        try:
+            self.db.add(db_session)
+            await self.db.commit()
+            await self.db.refresh(db_session)
+        except Exception:
+            await self.db.rollback()
+            try:
+                self.git_service.delete_branch(project_id, branch, force=True)
+            except Exception:
+                logger.warning(f"Failed to clean up orphaned branch {branch}")
+            raise
 
         return SuggestionSessionResponse(
             session_id=db_session.session_id,
