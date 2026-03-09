@@ -94,7 +94,7 @@ def _check_cycle_detect(graph: Graph) -> list[ConsistencyIssue]:
                 path.discard(current)
                 continue
             if current in path:
-                iri = str(cls)
+                iri = str(current)
                 if iri not in reported:
                     issues.append(
                         ConsistencyIssue(
