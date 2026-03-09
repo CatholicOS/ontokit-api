@@ -1,6 +1,5 @@
 """Project management endpoints."""
 
-import contextlib
 import logging
 from typing import Annotated
 from uuid import UUID
@@ -1236,6 +1235,16 @@ async def save_source_content(
             detail=f"Failed to save to storage: {e}",
         ) from e
 
+    # Capture old graph for change event diffing (before the commit)
+    old_graph = None
+    was_loaded = ontology.is_loaded(project_id, current_branch)
+    try:
+        if not was_loaded:
+            await ontology.load_from_git(project_id, current_branch, filename, git)
+        old_graph = await ontology._get_graph(project_id, current_branch)
+    except Exception:
+        logger.debug("Could not capture pre-commit graph for diff", exc_info=True)
+
     # Commit to git on the specified branch
     try:
         commit_info = git.commit_changes(
@@ -1252,12 +1261,6 @@ async def save_source_content(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to commit changes: {e}",
         ) from e
-
-    # Capture old graph for change event diffing
-    old_graph = None
-    if ontology.is_loaded(project_id, current_branch):
-        with contextlib.suppress(ValueError):
-            old_graph = await ontology._get_graph(project_id, current_branch)
 
     # Reload the ontology in memory to reflect changes
     try:
