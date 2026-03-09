@@ -114,6 +114,21 @@ class SearchService:
             tsvector.op("@@")(tsquery),
         ]
 
+        # This search operates at the project/ontology level and always
+        # returns results as entity_type="class".  If the caller requested
+        # only types that don't include "class", short-circuit to avoid
+        # returning misleading entity_type values.
+        if query.entity_types:
+            normalised = {t.lower() for t in query.entity_types}
+            if "class" not in normalised:
+                elapsed = (time.perf_counter() - start_time) * 1000
+                return SearchResponse(
+                    results=[],
+                    total=0,
+                    query=query.query,
+                    took_ms=elapsed,
+                )
+
         # Optional: restrict to specific project (ontology) IDs.
         if query.ontology_ids:
             conditions.append(cast(Project.id, String).in_(query.ontology_ids))
