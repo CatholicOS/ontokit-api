@@ -263,7 +263,13 @@ class EmbeddingService:
             )
             try:
                 graph = await ontology.load_from_git(project_id, branch, filename, git)
-            except Exception:
+            except (FileNotFoundError, KeyError, ValueError):
+                # Only fall back to storage for the default branch; a specific
+                # branch that doesn't exist in git should fail the job rather
+                # than silently embedding the storage snapshot under that branch.
+                default_branch = git.get_default_branch(project_id)
+                if branch and branch != default_branch:
+                    raise
                 graph = await ontology.load_from_storage(
                     project_id, project.source_file_path, branch
                 )
