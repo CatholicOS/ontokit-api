@@ -25,6 +25,7 @@ from ontokit.models.pull_request import (
     PullRequestReview,
     ReviewStatus,
 )
+from ontokit.models.upstream_sync import UpstreamSyncConfig
 from ontokit.models.user_github_token import UserGitHubToken
 from ontokit.schemas.project import ProjectRole
 from ontokit.schemas.pull_request import (
@@ -1138,6 +1139,38 @@ class PullRequestService:
 
         return self._to_github_integration_response(integration)
 
+    async def _sync_upstream_config_for_webhooks(
+        self,
+        project_id: UUID,
+        integration: GitHubIntegration,
+        webhooks_enabled: bool,
+    ) -> None:
+        """Create or update UpstreamSyncConfig when webhook state changes."""
+        result = await self.db.execute(
+            select(UpstreamSyncConfig).where(UpstreamSyncConfig.project_id == project_id)
+        )
+        sync_config = result.scalar_one_or_none()
+
+        if webhooks_enabled:
+            if sync_config is None:
+                sync_config = UpstreamSyncConfig(
+                    project_id=project_id,
+                    repo_owner=integration.repo_owner,
+                    repo_name=integration.repo_name,
+                    branch=integration.default_branch or "main",
+                    file_path=integration.ontology_file_path or "",
+                    frequency="webhook",
+                    enabled=True,
+                    update_mode="review_required",
+                )
+                self.db.add(sync_config)
+            else:
+                sync_config.frequency = "webhook"
+                sync_config.enabled = True
+        else:
+            if sync_config is not None and sync_config.frequency == "webhook":
+                sync_config.frequency = "manual"
+
     async def create_github_integration(
         self,
         project_id: UUID,
@@ -1185,6 +1218,12 @@ class PullRequestService:
         )
         self.git_service.setup_remote(project_id, remote_url)
 
+        # Auto-create upstream sync config when webhooks are enabled
+        if integration_create.webhooks_enabled:
+            await self._sync_upstream_config_for_webhooks(
+                project_id, db_integration, webhooks_enabled=True
+            )
+
         await self.db.commit()
         await self.db.refresh(db_integration)
 
@@ -1224,6 +1263,11 @@ class PullRequestService:
             # Clear hook ID when disabling webhooks
             if not integration_update.webhooks_enabled:
                 integration.github_hook_id = None
+
+            # Auto-create/update upstream sync config
+            await self._sync_upstream_config_for_webhooks(
+                project_id, integration, integration_update.webhooks_enabled
+            )
 
         await self.db.commit()
         await self.db.refresh(integration)
