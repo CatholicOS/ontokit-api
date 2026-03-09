@@ -437,6 +437,34 @@ async def run_single_entity_embed_task(
         raise
 
 
+async def run_batch_entity_embed_task(
+    ctx: dict[str, Any],
+    project_id: str,
+    branch: str,
+    entity_iris: list[str],
+) -> dict[str, Any]:
+    """Background task to re-embed a batch of entities."""
+    db: AsyncSession = ctx["db"]
+
+    try:
+        from ontokit.services.embedding_service import EmbeddingService
+
+        service = EmbeddingService(db)
+        for entity_iri in entity_iris:
+            await service.embed_single_entity(UUID(project_id), branch, entity_iri)
+
+        logger.info(f"Re-embedded {len(entity_iris)} entities for project {project_id}")
+        return {
+            "project_id": project_id,
+            "entity_count": len(entity_iris),
+            "status": "completed",
+        }
+
+    except Exception as e:
+        logger.exception(f"Batch entity embed failed for project {project_id}: {e}")
+        raise
+
+
 async def sync_github_projects(ctx: dict[str, Any]) -> dict[str, Any]:
     """Periodic task: pull from remote + push local commits for all GitHub-connected projects."""
     db: AsyncSession = ctx["db"]
@@ -588,6 +616,7 @@ class WorkerSettings:
         auto_submit_stale_suggestions,
         run_embedding_generation_task,
         run_single_entity_embed_task,
+        run_batch_entity_embed_task,
     ]
     redis_settings = get_redis_settings()
 

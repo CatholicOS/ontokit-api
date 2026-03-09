@@ -1303,14 +1303,18 @@ async def save_source_content(
                         project_id,
                     )
                 else:
-                    for event in change_events:
-                        if event.event_type != ChangeEventType.DELETE:
-                            await pool.enqueue_job(
-                                "run_single_entity_embed_task",
-                                str(project_id),
-                                current_branch,
-                                event.entity_iri,
-                            )
+                    entity_iris = [
+                        event.entity_iri
+                        for event in change_events
+                        if event.event_type != ChangeEventType.DELETE
+                    ]
+                    if entity_iris:
+                        await pool.enqueue_job(
+                            "run_batch_entity_embed_task",
+                            str(project_id),
+                            current_branch,
+                            entity_iris,
+                        )
         except Exception:
             logger.warning("Failed to queue auto-embed", exc_info=True)
 
