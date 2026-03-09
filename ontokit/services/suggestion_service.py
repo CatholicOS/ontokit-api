@@ -250,7 +250,22 @@ class SuggestionService:
         session.changes_count += 1
         self._update_entities_modified(session, data.entity_label)
         session.last_activity = datetime.now(UTC)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(
+                "Failed to update session metadata after successful git commit: "
+                "session=%s branch=%s commit=%s error=%s",
+                session.session_id,
+                session.branch,
+                commit_info.hash,
+                e,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Saved to branch but failed to update session metadata",
+            ) from e
 
         return SuggestionSaveResponse(
             commit_hash=commit_info.hash,
