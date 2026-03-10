@@ -31,3 +31,4 @@ repos:
           - pgvector>=0.3.0
           - sentence-transformers>=3.0.0
           - cryptography>=42.0.0
+          - pytest>=8.0.0

@@ -40,7 +40,7 @@ class SPARQLQuery(BaseModel):
     """SPARQL query request."""
 
     query: str = Field(..., min_length=1)
-    ontology_id: str | None = None
+    ontology_id: str = Field(..., description="Project ID to query against")
     default_graph: str | None = None
     timeout: int = Field(default=30, ge=1, le=300)
 

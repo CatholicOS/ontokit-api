@@ -8,10 +8,10 @@ from uuid import UUID
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from rdflib import Graph
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ontokit.core.auth import CurrentUser, OptionalUser, RequiredUser
+from ontokit.api.dependencies import load_project_graph, verify_project_access
+from ontokit.core.auth import OptionalUser, RequiredUser
 from ontokit.core.database import get_db
 from ontokit.schemas.quality import (
     ConsistencyCheckResult,
@@ -37,60 +37,6 @@ def _get_redis() -> aioredis.Redis:
     return redis_pool
 
 
-async def _load_graph(project_id: UUID, branch: str | None, db: AsyncSession) -> tuple[Graph, str]:
-    """Load the ontology graph for a project, ensuring it's in memory.
-
-    Returns (graph, resolved_branch) where resolved_branch is the actual branch used.
-    """
-    from sqlalchemy import select
-
-    from ontokit.git.bare_repository import BareGitRepositoryService
-    from ontokit.models.project import Project
-    from ontokit.services.ontology import get_ontology_service
-    from ontokit.services.storage import get_storage_service
-
-    result = await db.execute(select(Project).where(Project.id == project_id))
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-
-    if not project.source_file_path:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Project does not have an ontology file",
-        )
-
-    storage = get_storage_service()
-    ontology = get_ontology_service(storage)
-    git = BareGitRepositoryService()
-
-    # Resolve branch from repo default when not specified
-    resolved_branch = branch or git.get_default_branch(project_id)
-
-    if not ontology.is_loaded(project_id, resolved_branch):
-        import os
-
-        filename = getattr(project, "git_ontology_path", None) or os.path.basename(
-            project.source_file_path
-        )
-        try:
-            await ontology.load_from_git(project_id, resolved_branch, filename, git)
-        except (FileNotFoundError, KeyError, ValueError):
-            # Branch or file not in git — fall back to storage snapshot
-            await ontology.load_from_storage(project_id, project.source_file_path, resolved_branch)
-
-    graph = await ontology._get_graph(project_id, resolved_branch)
-    return graph, resolved_branch
-
-
-async def _verify_access(project_id: UUID, db: AsyncSession, user: CurrentUser | None) -> None:
-    """Verify project access using the lint module's pattern."""
-    from ontokit.services.project_service import get_project_service
-
-    service = get_project_service(db)
-    await service.get(project_id, user)
-
-
 @router.get(
     "/{project_id}/entities/{iri:path}/references",
     response_model=CrossReferencesResponse,
@@ -103,9 +49,9 @@ async def get_entity_references(
     branch: str | None = Query(default=None, description="Branch name"),
 ) -> CrossReferencesResponse:
     """Get all cross-references to a specific entity."""
-    await _verify_access(project_id, db, user)
+    await verify_project_access(project_id, db, user)
     decoded_iri = unquote(iri)
-    graph, _ = await _load_graph(project_id, branch, db)
+    graph, _ = await load_project_graph(project_id, branch, db)
     return get_cross_references(graph, decoded_iri)
 
 
@@ -120,8 +66,8 @@ async def trigger_consistency_check(
     branch: str | None = Query(default=None, description="Branch name"),
 ) -> ConsistencyCheckTriggerResponse:
     """Run consistency checks and cache the result."""
-    await _verify_access(project_id, db, user)
-    graph, resolved_branch = await _load_graph(project_id, branch, db)
+    await verify_project_access(project_id, db, user)
+    graph, resolved_branch = await load_project_graph(project_id, branch, db)
 
     result = run_consistency_check(graph, str(project_id), resolved_branch)
 
@@ -151,7 +97,7 @@ async def get_quality_job_result(
     user: OptionalUser,
 ) -> ConsistencyCheckResult:
     """Get consistency check results by job ID."""
-    await _verify_access(project_id, db, user)
+    await verify_project_access(project_id, db, user)
 
     try:
         redis = _get_redis()
@@ -178,7 +124,7 @@ async def get_consistency_issues(
     branch: str | None = Query(default=None, description="Branch name"),
 ) -> ConsistencyCheckResult:
     """Get cached consistency check results."""
-    await _verify_access(project_id, db, user)
+    await verify_project_access(project_id, db, user)
 
     # Resolve the branch so cache keys match what trigger_consistency_check stored
     from ontokit.git.bare_repository import BareGitRepositoryService
@@ -218,6 +164,6 @@ async def detect_duplicates(
     threshold: float = Query(default=0.85, ge=0.5, le=1.0),
 ) -> DuplicateDetectionResult:
     """Detect duplicate entities based on label similarity."""
-    await _verify_access(project_id, db, user)
-    graph, _ = await _load_graph(project_id, branch, db)
+    await verify_project_access(project_id, db, user)
+    graph, _ = await load_project_graph(project_id, branch, db)
     return find_duplicates(graph, threshold)

@@ -1,11 +1,14 @@
 """Search endpoints for ontology content."""
 
 from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from rdflib.plugins.sparql.parser import parseQuery, parseUpdate
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ontokit.api.dependencies import load_project_graph, verify_project_access
+from ontokit.core.auth import OptionalUser
 from ontokit.core.database import get_db
 from ontokit.schemas.search import SearchQuery, SearchResponse, SPARQLQuery, SPARQLResponse
 from ontokit.services.search import SearchService
@@ -53,13 +56,22 @@ async def search(
 async def execute_sparql(
     query: SPARQLQuery,
     service: Annotated[SearchService, Depends(get_search_service)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: OptionalUser,
+    branch: str | None = Query(default=None, description="Branch name"),
 ) -> SPARQLResponse:
     """
-    Execute a SPARQL query.
+    Execute a SPARQL query against a project's ontology graph.
 
     Supports SELECT, ASK, and CONSTRUCT queries.
     UPDATE queries are not allowed.
+    Requires `ontology_id` in the request body to identify the project.
     """
+    project_id = UUID(query.ontology_id)
+
+    # Verify access (public projects allow unauthenticated queries)
+    await verify_project_access(project_id, db, user)
+
     # Parse the query to determine its type and block updates
     query_text = query.query.strip()
     try:
@@ -79,7 +91,10 @@ async def execute_sparql(
             detail="UPDATE queries are not allowed. Use the REST API for modifications.",
         ) from None
 
+    # Load the project's ontology graph
+    graph, _ = await load_project_graph(project_id, branch, db)
+
     try:
-        return await service.execute_sparql(query)
+        return await service.execute_sparql(query, graph=graph)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

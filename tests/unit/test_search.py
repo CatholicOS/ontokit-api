@@ -3,11 +3,13 @@
 from uuid import uuid4
 
 import pytest
-from rdflib import Graph, Literal, Namespace, URIRef
+from rdflib import Graph, Literal, Namespace
 from rdflib.namespace import OWL, RDF, RDFS
 
 from ontokit.schemas.search import SearchQuery, SPARQLQuery
 from ontokit.services.search import SearchService, _sanitize_tsquery_input
+
+DUMMY_PROJECT_ID = str(uuid4())
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +94,7 @@ async def test_execute_sparql_select(sample_graph: Graph) -> None:
             "  ?cls <http://www.w3.org/2000/01/rdf-schema#label> ?label ."
             "}"
         ),
+        ontology_id=DUMMY_PROJECT_ID,
     )
 
     resp = await svc.execute_sparql(sparql, graph=sample_graph)
@@ -120,6 +123,7 @@ async def test_execute_sparql_ask(sample_graph: Graph) -> None:
     svc = SearchService()
     sparql = SPARQLQuery(
         query="ASK { ?x a <http://www.w3.org/2002/07/owl#Class> }",
+        ontology_id=DUMMY_PROJECT_ID,
     )
 
     resp = await svc.execute_sparql(sparql, graph=sample_graph)
@@ -132,10 +136,8 @@ async def test_execute_sparql_ask_false(sample_graph: Graph) -> None:
     """An ASK query returns False when the pattern has no match."""
     svc = SearchService()
     sparql = SPARQLQuery(
-        query=(
-            "ASK { <http://example.org/DoesNotExist>"
-            " a <http://www.w3.org/2002/07/owl#Class> }"
-        ),
+        query=("ASK { <http://example.org/DoesNotExist> a <http://www.w3.org/2002/07/owl#Class> }"),
+        ontology_id=DUMMY_PROJECT_ID,
     )
 
     resp = await svc.execute_sparql(sparql, graph=sample_graph)
@@ -156,6 +158,7 @@ async def test_execute_sparql_construct(sample_graph: Graph) -> None:
             "  ?cls <http://www.w3.org/2000/01/rdf-schema#label> ?label"
             "}"
         ),
+        ontology_id=DUMMY_PROJECT_ID,
     )
 
     resp = await svc.execute_sparql(sparql, graph=sample_graph)
@@ -173,6 +176,7 @@ async def test_execute_sparql_empty_graph() -> None:
     svc = SearchService()
     sparql = SPARQLQuery(
         query="SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 10",
+        ontology_id=DUMMY_PROJECT_ID,
     )
 
     resp = await svc.execute_sparql(sparql, graph=None)
@@ -188,6 +192,7 @@ async def test_execute_sparql_invalid_query() -> None:
     svc = SearchService()
     sparql = SPARQLQuery(
         query="THIS IS NOT VALID SPARQL AT ALL !!!",
+        ontology_id=DUMMY_PROJECT_ID,
     )
 
     with pytest.raises(ValueError, match="Invalid SPARQL query"):
