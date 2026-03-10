@@ -716,7 +716,7 @@ async def get_revision_history(
             if branch_info.commit_hash:
                 refs.setdefault(branch_info.commit_hash, []).append(branch_info.name)
     except Exception:
-        pass  # Non-critical: graph still works without ref labels
+        logger.debug("Failed to list branches for refs map", exc_info=True)
 
     return RevisionHistoryResponse(
         project_id=project_id,
