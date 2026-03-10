@@ -708,6 +708,16 @@ async def get_revision_history(
     # Get commit history
     commits = git.get_history(project_id, limit=limit)
 
+    # Build refs map: commit hash → branch names pointing at it
+    refs: dict[str, list[str]] = {}
+    try:
+        branches = git.list_branches(project_id)
+        for branch_info in branches:
+            if branch_info.commit_hash:
+                refs.setdefault(branch_info.commit_hash, []).append(branch_info.name)
+    except Exception:
+        pass  # Non-critical: graph still works without ref labels
+
     return RevisionHistoryResponse(
         project_id=project_id,
         commits=[
@@ -725,6 +735,7 @@ async def get_revision_history(
             for c in commits
         ],
         total=len(commits),
+        refs=refs,
     )
 
 
