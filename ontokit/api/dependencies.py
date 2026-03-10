@@ -1,5 +1,6 @@
 """Shared dependencies for API route handlers."""
 
+import asyncio
 import os
 from uuid import UUID
 
@@ -21,7 +22,7 @@ async def load_project_graph(
     loads the ontology from git (falling back to storage), and returns
     the in-memory RDFLib graph.
     """
-    from ontokit.git.bare_repository import BareGitRepositoryService
+    from ontokit.git.bare_repository import get_bare_git_service
     from ontokit.services.ontology import get_ontology_service
     from ontokit.services.storage import get_storage_service
 
@@ -38,9 +39,11 @@ async def load_project_graph(
 
     storage = get_storage_service()
     ontology = get_ontology_service(storage)
-    git = BareGitRepositoryService()
+    git = get_bare_git_service()
 
-    resolved_branch = branch or git.get_default_branch(project_id)
+    resolved_branch: str = (
+        branch if branch else await asyncio.to_thread(git.get_default_branch, project_id)
+    )
 
     if not ontology.is_loaded(project_id, resolved_branch):
         filename = getattr(project, "git_ontology_path", None) or os.path.basename(
