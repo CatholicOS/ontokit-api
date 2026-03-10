@@ -46,9 +46,7 @@ async def load_project_graph(
     )
 
     if not ontology.is_loaded(project_id, resolved_branch):
-        filename = getattr(project, "git_ontology_path", None) or os.path.basename(
-            project.source_file_path
-        )
+        filename = os.path.basename(project.source_file_path)
         try:
             await ontology.load_from_git(project_id, resolved_branch, filename, git)
         except (FileNotFoundError, KeyError, ValueError):
