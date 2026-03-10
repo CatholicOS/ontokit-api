@@ -139,6 +139,44 @@ Push the commit to start the next development cycle.
                                       0.3.0-dev  (next cycle)
 ```
 
+## Patch releases
+
+Patch releases are for **backporting critical bug fixes** to an older release line after `main` has already moved to the next development version. New features always ship in the next minor or major release on `main`.
+
+For example, if `main` is at `0.3.0-dev` but a bug is found in `0.2.0`:
+
+### 1. Create a release branch from the tag
+
+```bash
+git checkout -b release/0.2.x ontokit-0.2.0
+```
+
+### 2. Cherry-pick the fix
+
+```bash
+git cherry-pick <commit-sha>    # the fix from main
+```
+
+### 3. Bump to the patch version
+
+Edit `ontokit/version.py` to set `VERSION = "0.2.1"`, then commit:
+
+```bash
+git add ontokit/version.py
+git commit -m "chore: releasing 0.2.1"
+```
+
+### 4. Tag and push
+
+```bash
+git tag -s ontokit-0.2.1
+git push -u origin release/0.2.x && git push --tags
+```
+
+CI will run the lint/test/build checks and publish to PyPI, GitHub Releases, and GHCR as usual. The `release/0.2.x` branch can be kept for future patches on the same line.
+
+> **Note:** The `latest` Docker tag will point to the patch release. If the latest minor/major release should remain `latest`, manually retag after publishing.
+
 ## Deployment
 
 There are three ways to deploy the OntoKit API, depending on your needs.
