@@ -41,9 +41,7 @@ async def load_project_graph(
     ontology = get_ontology_service(storage)
     git = get_bare_git_service()
 
-    resolved_branch: str = (
-        branch if branch else await asyncio.to_thread(git.get_default_branch, project_id)
-    )
+    resolved_branch = await resolve_branch(project_id, branch)
 
     if not ontology.is_loaded(project_id, resolved_branch):
         filename = os.path.basename(project.source_file_path)
@@ -54,6 +52,16 @@ async def load_project_graph(
 
     graph = await ontology.get_graph(project_id, resolved_branch)
     return graph, resolved_branch
+
+
+async def resolve_branch(project_id: UUID, branch: str | None) -> str:
+    """Resolve a branch name, falling back to the repository default."""
+    if branch:
+        return branch
+    from ontokit.git.bare_repository import get_bare_git_service
+
+    git = get_bare_git_service()
+    return await asyncio.to_thread(git.get_default_branch, project_id)
 
 
 async def verify_project_access(

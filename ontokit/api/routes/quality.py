@@ -10,7 +10,7 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ontokit.api.dependencies import load_project_graph, verify_project_access
+from ontokit.api.dependencies import load_project_graph, resolve_branch, verify_project_access
 from ontokit.core.auth import OptionalUser, RequiredUser
 from ontokit.core.database import get_db
 from ontokit.schemas.quality import (
@@ -127,9 +127,7 @@ async def get_consistency_issues(
     await verify_project_access(project_id, db, user)
 
     # Resolve the branch so cache keys match what trigger_consistency_check stored
-    from ontokit.git.bare_repository import BareGitRepositoryService
-
-    resolved_branch = branch or BareGitRepositoryService().get_default_branch(project_id)
+    resolved_branch = await resolve_branch(project_id, branch)
 
     try:
         redis = _get_redis()
