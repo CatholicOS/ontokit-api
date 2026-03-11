@@ -1,6 +1,7 @@
 """Shared dependencies for API route handlers."""
 
 import asyncio
+import logging
 import os
 from uuid import UUID
 
@@ -11,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ontokit.core.auth import CurrentUser
 from ontokit.models.project import Project
+
+logger = logging.getLogger(__name__)
 
 
 async def load_project_graph(
@@ -48,6 +51,12 @@ async def load_project_graph(
         try:
             await ontology.load_from_git(project_id, resolved_branch, filename, git)
         except (FileNotFoundError, KeyError, ValueError):
+            logger.debug(
+                "Git loading failed for project %s branch %s, falling back to storage",
+                project_id,
+                resolved_branch,
+                exc_info=True,
+            )
             await ontology.load_from_storage(project_id, project.source_file_path, resolved_branch)
 
     graph = await ontology.get_graph(project_id, resolved_branch)
