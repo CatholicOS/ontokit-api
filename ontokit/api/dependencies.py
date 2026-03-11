@@ -60,6 +60,11 @@ async def load_project_graph(
             try:
                 await ontology.load_from_git(project_id, resolved_branch, filename, git)
             except (FileNotFoundError, KeyError, ValueError):
+                if branch is not None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Ontology file not found on branch '{resolved_branch}'",
+                    ) from None
                 logger.debug(
                     "Git loading failed for project %s branch %s, falling back to storage",
                     project_id,
