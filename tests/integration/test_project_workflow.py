@@ -49,7 +49,7 @@ class TestProjectWorkflow:
         count_result = MagicMock()
         count_result.scalar_one.return_value = 0
         data_result = MagicMock()
-        data_result.__iter__ = lambda _self: iter([])
+        data_result.__iter__ = MagicMock(return_value=iter([]))
         mock_session.execute = AsyncMock(side_effect=[count_result, data_result])
 
         response = client.get("/api/v1/search?q=test")
