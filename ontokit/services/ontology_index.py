@@ -557,19 +557,19 @@ class OntologyIndexService:
         result = await self.db.execute(stmt)
         rows = result.all()
 
-        nodes = []
-        for row in rows:
-            label = await self._resolve_preferred_label(
-                project_id, branch, row.iri, label_preferences
-            )
-            nodes.append(
-                {
-                    "iri": row.iri,
-                    "label": label or row.local_name,
-                    "child_count": row.child_count or 0,
-                    "deprecated": row.deprecated,
-                }
-            )
+        # Bulk-resolve labels for all children
+        iris = [row.iri for row in rows]
+        label_map = await self._resolve_labels_bulk(project_id, branch, iris, label_preferences)
+
+        nodes = [
+            {
+                "iri": row.iri,
+                "label": label_map.get(row.iri) or row.local_name,
+                "child_count": row.child_count or 0,
+                "deprecated": row.deprecated,
+            }
+            for row in rows
+        ]
 
         nodes.sort(key=lambda n: n["label"].lower())
         return nodes
