@@ -772,35 +772,67 @@ class OntologyIndexService:
             project_id, branch, class_iri, ancestor_iris, owl_thing_iri
         )
 
-        # Convert to tree nodes
+        # Batch-fetch all data for path nodes to avoid N+1 queries
+
+        # 1. Entity info (id, deprecated) for all path IRIs
+        entities_result = await self.db.execute(
+            select(IndexedEntity.id, IndexedEntity.iri, IndexedEntity.deprecated).where(
+                IndexedEntity.project_id == project_id,
+                IndexedEntity.branch == branch,
+                IndexedEntity.iri.in_(path),
+            )
+        )
+        entity_map: dict[str, tuple[uuid.UUID, bool]] = {}
+        entity_ids: list[uuid.UUID] = []
+        for row in entities_result.all():
+            entity_map[row.iri] = (row.id, row.deprecated)
+            entity_ids.append(row.id)
+
+        # 2. Child counts grouped by parent_iri
+        child_counts_result = await self.db.execute(
+            select(
+                IndexedHierarchy.parent_iri,
+                func.count().label("cnt"),
+            )
+            .where(
+                IndexedHierarchy.project_id == project_id,
+                IndexedHierarchy.branch == branch,
+                IndexedHierarchy.parent_iri.in_(path),
+            )
+            .group_by(IndexedHierarchy.parent_iri)
+        )
+        child_count_map: dict[str, int] = {
+            row.parent_iri: row.cnt for row in child_counts_result.all()
+        }
+
+        # 3. Bulk label resolution
+        labels_result = await self.db.execute(
+            select(IndexedLabel).where(IndexedLabel.entity_id.in_(entity_ids))
+        )
+        labels_by_entity: dict[uuid.UUID, list[Any]] = {}
+        for lbl in labels_result.scalars().all():
+            labels_by_entity.setdefault(lbl.entity_id, []).append(lbl)
+
+        prefs = label_preferences or DEFAULT_LABEL_PREFERENCES
+
+        # Assemble nodes from in-memory maps
         nodes = []
         for iri in path:
-            label = await self._resolve_preferred_label(project_id, branch, iri, label_preferences)
-            # Count children for this ancestor
-            child_count_result = await self.db.execute(
-                select(func.count()).where(
-                    IndexedHierarchy.project_id == project_id,
-                    IndexedHierarchy.branch == branch,
-                    IndexedHierarchy.parent_iri == iri,
-                )
-            )
-            child_count = child_count_result.scalar() or 0
+            entity_info = entity_map.get(iri)
+            entity_id = entity_info[0] if entity_info else None
+            deprecated = entity_info[1] if entity_info else False
 
-            # Check deprecated
-            dep_result = await self.db.execute(
-                select(IndexedEntity.deprecated).where(
-                    IndexedEntity.project_id == project_id,
-                    IndexedEntity.branch == branch,
-                    IndexedEntity.iri == iri,
-                )
+            label = (
+                self._pick_preferred_label(labels_by_entity.get(entity_id, []), prefs)
+                if entity_id
+                else None
             )
-            deprecated = dep_result.scalar() or False
 
             nodes.append(
                 {
                     "iri": iri,
                     "label": label or _extract_local_name(iri),
-                    "child_count": child_count,
+                    "child_count": child_count_map.get(iri, 0),
                     "deprecated": deprecated,
                 }
             )
