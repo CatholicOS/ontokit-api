@@ -257,6 +257,8 @@ services:
       SUPERADMIN_USER_IDS: ${SUPERADMIN_USER_IDS:-}
     entrypoint: ["/usr/local/bin/entrypoint.sh"]
     command: ["uvicorn", "ontokit.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    # RUN_MIGRATIONS=1 (default) runs alembic on startup.
+    # Set RUN_MIGRATIONS=0 on non-leader replicas in multi-replica deployments.
     ports:
       - "8000:8000"
     volumes:
