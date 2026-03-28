@@ -1024,7 +1024,10 @@ class OntologyIndexService:
                 }
             )
 
-        # Sort: prefix matches first, then alphabetical
+        # Sort: prefix matches first, then alphabetical.
+        # NOTE: This runs after SQL LIMIT, so better prefix matches beyond the
+        # limit may be excluded. To fix, either push prefix-ordering into the SQL
+        # query (e.g., CASE WHEN on label similarity) or over-fetch and trim.
         if query != "*":
             query_lower = query.lower()
 
