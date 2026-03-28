@@ -886,7 +886,7 @@ class OntologyIndexService:
                 break
             visited.add(current)
 
-            ancestor_parents = parents_by_child.get(current, [])
+            ancestor_parents = sorted(parents_by_child.get(current, []))
             if not ancestor_parents:
                 break
 
