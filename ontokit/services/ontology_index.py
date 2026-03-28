@@ -595,6 +595,8 @@ class OntologyIndexService:
             return None
 
         # Get labels (rdfs:label specifically)
+        # Lang fallback: "en" for labels/comments (human text), "" for annotations
+        # (may include URIs). Matches ontology.py _class_to_response behavior.
         rdfs_label_iri = str(RDFS.label)
         labels_result = await self.db.execute(
             select(IndexedLabel).where(
