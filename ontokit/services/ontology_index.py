@@ -206,6 +206,7 @@ class OntologyIndexService:
             project_id=project_id,
             branch=branch,
             status=new_status.value,
+            updated_at=datetime.now(UTC),
         )
         upsert_stmt = insert_stmt.on_conflict_do_update(
             index_elements=["project_id", "branch"],
