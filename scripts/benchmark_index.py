@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import gc
+import logging
 import os
 import resource
 import statistics
@@ -35,6 +36,8 @@ from rdflib.namespace import OWL, RDF, RDFS, SKOS
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────
@@ -472,7 +475,7 @@ async def benchmark_postgres(num_classes: int, iterations: int = 3) -> list[Benc
                 )
                 await db.commit()
         except Exception:
-            pass  # Best-effort cleanup
+            logger.warning("Best-effort benchmark cleanup failed", exc_info=True)
         await engine.dispose()
     return results
 
