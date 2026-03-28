@@ -1138,8 +1138,10 @@ class OntologyIndexService:
         preferences: list[str] | None = None,
     ) -> str | None:
         """
-        Resolve the preferred label for an entity using SQL,
-        matching the logic of select_preferred_label() from ontology.py.
+        Resolve the preferred label for a single entity using SQL.
+
+        Fetches labels from the DB and delegates to _pick_preferred_label
+        for preference matching.
         """
         prefs = preferences or DEFAULT_LABEL_PREFERENCES
 
@@ -1159,34 +1161,6 @@ class OntologyIndexService:
         labels_result = await self.db.execute(
             select(IndexedLabel).where(IndexedLabel.entity_id == entity_id)
         )
-        labels = labels_result.scalars().all()
+        labels = list(labels_result.scalars().all())
 
-        if not labels:
-            return None
-
-        # Apply preference ordering
-        for pref_string in prefs:
-            if "@" in pref_string:
-                prop_part, lang = pref_string.rsplit("@", 1)
-            else:
-                prop_part = pref_string
-                lang = None
-
-            prop_uri_ref = LABEL_PROPERTY_MAP.get(prop_part)
-            if prop_uri_ref is None:
-                continue
-            prop_iri_str = str(prop_uri_ref)
-
-            for label in labels:
-                if label.property_iri != prop_iri_str:
-                    continue
-                if lang is None or (lang == "" and label.lang is None) or label.lang == lang:
-                    return label.value
-
-        # Fallback: any rdfs:label
-        rdfs_label_iri = str(RDFS.label)
-        for label in labels:
-            if label.property_iri == rdfs_label_iri:
-                return label.value
-
-        return None
+        return self._pick_preferred_label(labels, prefs)
