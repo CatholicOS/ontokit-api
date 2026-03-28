@@ -493,19 +493,19 @@ class OntologyIndexService:
         result = await self.db.execute(stmt)
         rows = result.all()
 
-        nodes = []
-        for row in rows:
-            label = await self._resolve_preferred_label(
-                project_id, branch, row.iri, label_preferences
-            )
-            nodes.append(
-                {
-                    "iri": row.iri,
-                    "label": label or row.local_name,
-                    "child_count": row.child_count or 0,
-                    "deprecated": row.deprecated,
-                }
-            )
+        # Bulk-resolve labels for all root classes
+        iris = [row.iri for row in rows]
+        label_map = await self._resolve_labels_bulk(project_id, branch, iris, label_preferences)
+
+        nodes = [
+            {
+                "iri": row.iri,
+                "label": label_map.get(row.iri) or row.local_name,
+                "child_count": row.child_count or 0,
+                "deprecated": row.deprecated,
+            }
+            for row in rows
+        ]
 
         # Sort by resolved label
         nodes.sort(key=lambda n: n["label"].lower())
@@ -1085,6 +1085,57 @@ class OntologyIndexService:
     # ──────────────────────────────────────────────
     # Label resolution
     # ──────────────────────────────────────────────
+
+    async def _resolve_labels_bulk(
+        self,
+        project_id: UUID,
+        branch: str,
+        iris: list[str],
+        preferences: list[str] | None = None,
+    ) -> dict[str, str | None]:
+        """Resolve preferred labels for multiple IRIs in a single DB query.
+
+        Returns a dict mapping IRI -> preferred label (or None).
+        """
+        if not iris:
+            return {}
+
+        prefs = preferences or DEFAULT_LABEL_PREFERENCES
+
+        # Get entity IDs for all IRIs
+        entities_result = await self.db.execute(
+            select(IndexedEntity.id, IndexedEntity.iri).where(
+                IndexedEntity.project_id == project_id,
+                IndexedEntity.branch == branch,
+                IndexedEntity.iri.in_(iris),
+            )
+        )
+        iri_to_entity_id: dict[str, uuid.UUID] = {}
+        entity_ids: list[uuid.UUID] = []
+        for row in entities_result.all():
+            iri_to_entity_id[row.iri] = row.id
+            entity_ids.append(row.id)
+
+        if not entity_ids:
+            return dict.fromkeys(iris)
+
+        # Bulk fetch all labels
+        labels_result = await self.db.execute(
+            select(IndexedLabel).where(IndexedLabel.entity_id.in_(entity_ids))
+        )
+        labels_by_entity: dict[uuid.UUID, list[Any]] = {}
+        for lbl in labels_result.scalars().all():
+            labels_by_entity.setdefault(lbl.entity_id, []).append(lbl)
+
+        # Resolve for each IRI
+        result: dict[str, str | None] = {}
+        for iri in iris:
+            entity_id = iri_to_entity_id.get(iri)
+            if entity_id is None:
+                result[iri] = None
+            else:
+                result[iri] = self._pick_preferred_label(labels_by_entity.get(entity_id, []), prefs)
+        return result
 
     async def _resolve_preferred_label(
         self,
