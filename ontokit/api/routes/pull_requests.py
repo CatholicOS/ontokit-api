@@ -188,7 +188,31 @@ async def merge_pull_request(
     - PR must be open and meet approval requirements
     - Optionally delete the source branch after merge
     """
-    return await service.merge_pull_request(project_id, pr_number, merge_request, user)
+    result = await service.merge_pull_request(project_id, pr_number, merge_request, user)
+
+    # Trigger ontology index rebuild for the target branch after merge
+    if result.success:
+        try:
+            import logging
+
+            from ontokit.api.utils.redis import get_arq_pool
+
+            pool = await get_arq_pool()
+            if pool is not None:
+                # Get the target branch from the PR
+                pr = await service._get_pr(project_id, pr_number)
+                await pool.enqueue_job(
+                    "run_ontology_index_task",
+                    str(project_id),
+                    pr.target_branch,
+                    result.merge_commit_hash,
+                )
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Failed to queue ontology re-index after PR merge", exc_info=True
+            )
+
+    return result
 
 
 # Review Endpoints
