@@ -15,6 +15,7 @@ from rdflib import Graph, URIRef
 from rdflib import Literal as RDFLiteral
 from rdflib.namespace import OWL, RDF, RDFS, SKOS
 from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import insert as sa_insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -402,9 +403,7 @@ class OntologyIndexService:
         """Insert rows in batches."""
         if not rows:
             return
-        from sqlalchemy import insert
-
-        stmt = insert(model)
+        stmt = sa_insert(model)
         for i in range(0, len(rows), BATCH_SIZE):
             batch = rows[i : i + BATCH_SIZE]
             await self.db.execute(stmt, batch)
