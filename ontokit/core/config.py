@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     @field_validator("database_url", mode="before")
     @classmethod
-    def convert_postgres_scheme(cls, v):
+    def convert_postgres_scheme(cls, v: object) -> object:
         """Railway provides postgresql:// but SQLAlchemy async needs postgresql+asyncpg://."""
         if isinstance(v, str) and v.startswith("postgresql://"):
             return v.replace("postgresql://", "postgresql+asyncpg://", 1)
