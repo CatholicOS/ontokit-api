@@ -97,8 +97,7 @@ async def run_ontology_index_task(
             if commit_hash is None:
                 try:
                     repo = git_service.get_repository(project_uuid)
-                    commit = repo._resolve_ref(branch)
-                    commit_hash = str(commit.id)
+                    commit_hash = repo.get_branch_commit_hash(branch)
                 except Exception:
                     commit_hash = "unknown"
         else:
