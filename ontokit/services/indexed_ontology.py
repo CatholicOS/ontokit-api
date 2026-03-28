@@ -41,7 +41,11 @@ class IndexedOntologyService:
 
     async def _should_use_index(self, project_id: UUID, branch: str) -> bool:
         """Check if the index is ready and should be used."""
-        return await self.index.is_index_ready(project_id, branch)
+        try:
+            return await self.index.is_index_ready(project_id, branch)
+        except Exception:
+            # Table may not exist if migration hasn't run yet
+            return False
 
     async def _enqueue_reindex_if_stale(
         self,
