@@ -416,7 +416,12 @@ class OntologyIndexService:
     async def delete_branch_index(
         self, project_id: UUID, branch: str, *, auto_commit: bool = True
     ) -> None:
-        """Delete all index data for a project/branch, including status."""
+        """Delete all index data for a project/branch, including status.
+
+        When auto_commit=True (the default), commits the transaction after
+        deleting. Pass auto_commit=False when participating in a larger
+        transaction — the caller is responsible for committing.
+        """
         await self._delete_index_data(project_id, branch)
         await self.db.execute(
             delete(OntologyIndexStatus).where(
