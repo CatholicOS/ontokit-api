@@ -188,6 +188,10 @@ async def merge_pull_request(
     - PR must be open and meet approval requirements
     - Optionally delete the source branch after merge
     """
+    # Capture target branch before merge for post-merge processing
+    pr_info = await service.get_pull_request(project_id, pr_number, user)
+    target_branch = pr_info.target_branch
+
     result = await service.merge_pull_request(project_id, pr_number, merge_request, user)
 
     # Trigger ontology index rebuild for the target branch after merge
@@ -199,12 +203,10 @@ async def merge_pull_request(
 
             pool = await get_arq_pool()
             if pool is not None:
-                # Get the target branch from the PR
-                pr = await service._get_pr(project_id, pr_number)
                 await pool.enqueue_job(
                     "run_ontology_index_task",
                     str(project_id),
-                    pr.target_branch,
+                    target_branch,
                     result.merge_commit_hash,
                 )
         except Exception:
