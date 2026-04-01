@@ -118,9 +118,11 @@ class BareOntologyRepository:
 
     def _get_signature(self, name: str | None = None, email: str | None = None) -> pygit2.Signature:
         """Create a pygit2 signature for commits."""
+        from ontokit.core.constants import ONTOKIT_COMMITTER_EMAIL, ONTOKIT_COMMITTER_NAME
+
         return pygit2.Signature(
-            name=name or "OntoKit",
-            email=email or "noreply@ontokit.dev",
+            name=name or ONTOKIT_COMMITTER_NAME,
+            email=email or ONTOKIT_COMMITTER_EMAIL,
         )
 
     def _resolve_ref(self, ref: str) -> pygit2.Commit:

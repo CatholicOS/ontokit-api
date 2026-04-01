@@ -661,31 +661,50 @@ async def github_webhook(
             push_branch = ref[len("refs/heads/") :]
             commits = payload.get("commits", [])
 
-            from ontokit.models.upstream_sync import UpstreamSyncConfig
+            # Loop prevention: skip upstream check if all commits in this push
+            # were authored by OntoKit itself (prevents feedback loops when
+            # OntoKit pushes to the same repo it tracks as upstream).
+            from ontokit.core.constants import ONTOKIT_COMMITTER_EMAILS
 
-            sync_result = await service.db.execute(
-                select(UpstreamSyncConfig).where(
-                    UpstreamSyncConfig.project_id == project_id,
-                    UpstreamSyncConfig.enabled.is_(True),
-                    UpstreamSyncConfig.frequency == "webhook",
+            external_commits = [
+                c
+                for c in commits
+                if c.get("committer", {}).get("email") not in ONTOKIT_COMMITTER_EMAILS
+            ]
+
+            if not external_commits:
+                logger.info(
+                    "Skipping upstream sync check for project %s: "
+                    "all %d commit(s) in push are OntoKit-authored",
+                    project_id,
+                    len(commits),
                 )
-            )
-            sync_config = sync_result.scalar_one_or_none()
+            else:
+                from ontokit.models.upstream_sync import UpstreamSyncConfig
 
-            if sync_config and sync_config.branch == push_branch:
-                # Check if any commit touches the tracked file
-                touched_files: set[str] = set()
-                for commit in commits:
-                    touched_files.update(commit.get("added", []))
-                    touched_files.update(commit.get("modified", []))
+                sync_result = await service.db.execute(
+                    select(UpstreamSyncConfig).where(
+                        UpstreamSyncConfig.project_id == project_id,
+                        UpstreamSyncConfig.enabled.is_(True),
+                        UpstreamSyncConfig.frequency == "webhook",
+                    )
+                )
+                sync_config = sync_result.scalar_one_or_none()
 
-                if sync_config.file_path in touched_files:
-                    from ontokit.api.utils.redis import get_arq_pool
+                if sync_config and sync_config.branch == push_branch:
+                    # Check if any external commit touches the tracked file
+                    touched_files: set[str] = set()
+                    for commit in external_commits:
+                        touched_files.update(commit.get("added", []))
+                        touched_files.update(commit.get("modified", []))
 
-                    sync_config.status = "checking"
-                    await service.db.commit()
+                    if sync_config.file_path in touched_files:
+                        from ontokit.api.utils.redis import get_arq_pool
 
-                    pool = await get_arq_pool()
-                    await pool.enqueue_job("run_upstream_check_task", str(project_id))
+                        sync_config.status = "checking"
+                        await service.db.commit()
+
+                        pool = await get_arq_pool()
+                        await pool.enqueue_job("run_upstream_check_task", str(project_id))
 
     return {"status": "ok"}
