@@ -7,14 +7,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies
+# Install system dependencies (git + libgit2-dev required by pygit2/gitpython)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    git \
+    libgit2-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash ontokit
 WORKDIR /home/ontokit/app
+
+# Create git repo storage directory
+RUN mkdir -p /data/repos && chown ontokit:ontokit /data/repos
 
 # Install Python dependencies
 COPY pyproject.toml README.md ./
@@ -29,8 +34,15 @@ COPY --chown=ontokit:ontokit ontokit/ ./ontokit/
 COPY --chown=ontokit:ontokit alembic.ini ./
 COPY --chown=ontokit:ontokit alembic/ ./alembic/
 
+# Copy entrypoint script (runs migrations before starting the app)
+COPY --chown=ontokit:ontokit scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
 # Switch to non-root user
 USER ontokit
+
+# Pre-download sentence-transformers model to avoid first-request latency
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
 # Expose port
 EXPOSE 8000
@@ -39,5 +51,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the application (production - no reload, multiple workers)
+# Auto-migrate on startup, then run the app
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["uvicorn", "ontokit.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

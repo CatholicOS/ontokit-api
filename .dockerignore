@@ -1,0 +1,15 @@
+.env
+.env.*
+.git
+.gitignore
+__pycache__
+*.pyc
+.mypy_cache
+.pytest_cache
+.ruff_cache
+data/
+compose.override.yaml
+PHASE_D_PLAN.md
+CLAUDE.md
+*.md
+!README.md
