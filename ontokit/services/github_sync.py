@@ -191,7 +191,12 @@ def _try_merge(
         # Create merge commit
         local_commit = cast(pygit2.Commit, repo.get(local_oid))
         remote_commit = cast(pygit2.Commit, repo.get(remote_oid))
-        sig = pygit2.Signature("OntoKit Sync", "sync@ontokit.dev")
+        from ontokit.core.constants import (
+            ONTOKIT_SYNC_COMMITTER_EMAIL,
+            ONTOKIT_SYNC_COMMITTER_NAME,
+        )
+
+        sig = pygit2.Signature(ONTOKIT_SYNC_COMMITTER_NAME, ONTOKIT_SYNC_COMMITTER_EMAIL)
         repo.create_commit(
             f"refs/heads/{branch}",
             sig,
