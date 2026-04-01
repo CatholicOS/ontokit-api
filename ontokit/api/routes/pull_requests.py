@@ -9,6 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ontokit.api.utils.redis import get_arq_pool
 from ontokit.core.auth import OptionalUser, RequiredUser
 from ontokit.core.database import get_db
 from ontokit.schemas.pull_request import (
@@ -200,8 +201,6 @@ async def merge_pull_request(
     # Trigger ontology index rebuild for the target branch after merge
     if result.success:
         try:
-            from ontokit.api.utils.redis import get_arq_pool
-
             pool = await get_arq_pool()
             if pool is not None:
                 await pool.enqueue_job(
@@ -680,8 +679,6 @@ async def github_webhook(
                     touched_files.update(commit.get("modified", []))
 
                 if sync_config.file_path in touched_files:
-                    from ontokit.api.utils.redis import get_arq_pool
-
                     sync_config.status = "checking"
                     await service.db.commit()
 

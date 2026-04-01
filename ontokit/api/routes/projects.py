@@ -58,6 +58,7 @@ from ontokit.schemas.pull_request import (
 from ontokit.services.github_service import get_github_service
 from ontokit.services.indexed_ontology import IndexedOntologyService
 from ontokit.services.ontology import OntologyService, get_ontology_service
+from ontokit.services.ontology_index import OntologyIndexService
 from ontokit.services.project_service import ProjectService, get_project_service
 from ontokit.services.sitemap_notifier import notify_sitemap_add, notify_sitemap_remove
 from ontokit.services.storage import StorageError, StorageService, get_storage_service
@@ -1214,8 +1215,6 @@ async def delete_branch(
 
     # Clean up ontology index for deleted branch
     try:
-        from ontokit.services.ontology_index import OntologyIndexService
-
         index_service = OntologyIndexService(db)
         await index_service.delete_branch_index(project_id, branch_name, auto_commit=False)
     except Exception:
