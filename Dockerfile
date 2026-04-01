@@ -33,6 +33,10 @@ COPY --chown=ontokit:ontokit ontokit/ ./ontokit/
 COPY --chown=ontokit:ontokit alembic.ini ./
 COPY --chown=ontokit:ontokit alembic/ ./alembic/
 
+# Copy entrypoint script (runs migrations before starting the app)
+COPY --chown=ontokit:ontokit scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
 # Switch to non-root user
 USER ontokit
 
@@ -43,5 +47,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the application with hot reload (for development)
+# Auto-migrate on startup, then run the app
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["uvicorn", "ontokit.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

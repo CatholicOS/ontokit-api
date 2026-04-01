@@ -10,7 +10,16 @@ from ontokit.models.lint import (
     LintRun,
     LintRunStatus,
 )
+from ontokit.models.normalization import NormalizationRun
 from ontokit.models.notification import Notification
+from ontokit.models.ontology_index import (
+    IndexedAnnotation,
+    IndexedEntity,
+    IndexedHierarchy,
+    IndexedLabel,
+    IndexingStatus,
+    OntologyIndexStatus,
+)
 from ontokit.models.project import Project, ProjectMember
 from ontokit.models.pull_request import (
     GitHubIntegration,
@@ -30,6 +39,11 @@ __all__ = [
     "EmbeddingJob",
     "EntityChangeEvent",
     "EntityEmbedding",
+    "IndexedAnnotation",
+    "IndexedEntity",
+    "IndexedHierarchy",
+    "IndexedLabel",
+    "IndexingStatus",
     "GitHubIntegration",
     "JoinRequest",
     "JoinRequestStatus",
@@ -37,7 +51,9 @@ __all__ = [
     "LintIssueType",
     "LintRun",
     "LintRunStatus",
+    "NormalizationRun",
     "Notification",
+    "OntologyIndexStatus",
     "PRStatus",
     "Project",
     "ProjectEmbeddingConfig",

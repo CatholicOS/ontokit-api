@@ -255,6 +255,10 @@ services:
       GITHUB_TOKEN_ENCRYPTION_KEY: ${GITHUB_TOKEN_ENCRYPTION_KEY:-}
       # Superadmin - comma-separated list of Zitadel user IDs with full system access
       SUPERADMIN_USER_IDS: ${SUPERADMIN_USER_IDS:-}
+    entrypoint: ["/usr/local/bin/entrypoint.sh"]
+    command: ["uvicorn", "ontokit.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    # RUN_MIGRATIONS=1 (default) runs alembic on startup.
+    # Set RUN_MIGRATIONS=0 on non-leader replicas in multi-replica deployments.
     ports:
       - "8000:8000"
     volumes:
@@ -262,6 +266,8 @@ services:
       - ./ontokit:/home/ontokit/app/ontokit:ro
       # Mount alembic for migrations in development
       - ./alembic:/home/ontokit/app/alembic:ro
+      # Mount entrypoint so migration changes are picked up without rebuild
+      - ./scripts/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       # Git repositories for version control
       - git_repos:/data/repos
     healthcheck:

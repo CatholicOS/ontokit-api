@@ -55,6 +55,8 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
         pool = aioredis.from_url(  # type: ignore[no-untyped-call]
             str(settings.redis_url),
             decode_responses=True,
+            socket_connect_timeout=10,
+            socket_timeout=10,
         )
         await pool.ping()
         redis_pool = pool

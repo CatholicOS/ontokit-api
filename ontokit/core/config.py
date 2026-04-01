@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, PostgresDsn, RedisDsn
+from pydantic import Field, PostgresDsn, RedisDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     database_url: PostgresDsn = Field(
         default="postgresql+asyncpg://ontokit:ontokit@localhost:5432/ontokit"  # type: ignore[assignment]
     )
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def convert_postgres_scheme(cls, v: object) -> object:
+        """Railway provides postgresql:// but SQLAlchemy async needs postgresql+asyncpg://."""
+        if isinstance(v, str) and v.startswith("postgresql://"):
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
 
     # Redis
     redis_url: RedisDsn = Field(default="redis://localhost:6379/0")  # type: ignore[assignment]

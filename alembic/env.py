@@ -22,7 +22,13 @@ if config.config_file_name is not None:
 from ontokit.core.database import Base  # noqa: E402
 from ontokit.models import (  # noqa: E402, F401
     BranchMetadata,
+    IndexedAnnotation,
+    IndexedEntity,
+    IndexedHierarchy,
+    IndexedLabel,
     JoinRequest,
+    NormalizationRun,
+    OntologyIndexStatus,
     Project,
     ProjectMember,
     UserGitHubToken,

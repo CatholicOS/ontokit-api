@@ -19,6 +19,7 @@ from sqlalchemy import func as sa_func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ontokit.api.utils.redis import get_arq_pool
 from ontokit.core.auth import OptionalUser, RequiredUser, RequiredUserWithToken
 from ontokit.core.database import get_db
 from ontokit.core.encryption import decrypt_token
@@ -55,6 +56,7 @@ from ontokit.schemas.pull_request import (
     ProjectCreateFromGitHub,
 )
 from ontokit.services.github_service import get_github_service
+from ontokit.services.indexed_ontology import IndexedOntologyService
 from ontokit.services.ontology import OntologyService, get_ontology_service
 from ontokit.services.project_service import ProjectService, get_project_service
 from ontokit.services.sitemap_notifier import notify_sitemap_add, notify_sitemap_remove
@@ -87,6 +89,15 @@ def get_ontology() -> OntologyService:
 def get_git() -> GitRepositoryService:
     """Dependency to get git repository service."""
     return get_git_service()
+
+
+def get_indexed_ontology(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> IndexedOntologyService:
+    """Dependency to get indexed ontology service (SQL index + RDFLib fallback)."""
+    storage = get_storage_service()
+    ontology = get_ontology_service(storage)
+    return IndexedOntologyService(ontology, db)
 
 
 @router.get("", response_model=ProjectListResponse)
@@ -170,6 +181,19 @@ async def import_project(
     )
     if is_public:
         background_tasks.add_task(notify_sitemap_add, result.id, result.updated_at)
+
+    # Trigger ontology index build for newly imported project
+    try:
+        pool = await get_arq_pool()
+        if pool is not None:
+            await pool.enqueue_job(
+                "run_ontology_index_task",
+                str(result.id),
+                "main",
+            )
+    except Exception:
+        logger.warning("Failed to queue ontology index for imported project", exc_info=True)
+
     return result
 
 
@@ -284,6 +308,19 @@ async def create_project_from_github(
     )
     if data.is_public:
         background_tasks.add_task(notify_sitemap_add, result.id, result.updated_at)
+
+    # Trigger ontology index build for GitHub-imported project
+    try:
+        pool = await get_arq_pool()
+        if pool is not None:
+            await pool.enqueue_job(
+                "run_ontology_index_task",
+                str(result.id),
+                default_branch or "main",
+            )
+    except Exception:
+        logger.warning("Failed to queue ontology index for GitHub project", exc_info=True)
+
     return result
 
 
@@ -523,6 +560,7 @@ async def get_ontology_tree_root(
     project_id: UUID,
     service: Annotated[ProjectService, Depends(get_service)],
     ontology: Annotated[OntologyService, Depends(get_ontology)],
+    indexed: Annotated[IndexedOntologyService, Depends(get_indexed_ontology)],
     git: Annotated[GitRepositoryService, Depends(get_git)],
     user: OptionalUser,
     branch: str | None = Query(default=None, description="Branch to read from"),
@@ -532,16 +570,17 @@ async def get_ontology_tree_root(
 
     Returns the top-level classes (classes with no parent or only owl:Thing as parent)
     as tree nodes optimized for tree view rendering.
+    Uses PostgreSQL index when available, falls back to RDFLib.
     """
     resolved_branch = branch or git.get_default_branch(project_id)
     project = await _ensure_ontology_loaded(
         project_id, service, ontology, user, resolved_branch, git
     )
 
-    nodes = await ontology.get_root_tree_nodes(
+    nodes = await indexed.get_root_tree_nodes(
         project_id, project.label_preferences, resolved_branch
     )
-    total_classes = await ontology.get_class_count(project_id, resolved_branch)
+    total_classes = await indexed.get_class_count(project_id, resolved_branch)
 
     return OWLClassTreeResponse(nodes=nodes, total_classes=total_classes)
 
@@ -554,6 +593,7 @@ async def get_ontology_tree_children(
     class_iri: str,
     service: Annotated[ProjectService, Depends(get_service)],
     ontology: Annotated[OntologyService, Depends(get_ontology)],
+    indexed: Annotated[IndexedOntologyService, Depends(get_indexed_ontology)],
     git: Annotated[GitRepositoryService, Depends(get_git)],
     user: OptionalUser,
     branch: str | None = Query(default=None, description="Branch to read from"),
@@ -568,10 +608,10 @@ async def get_ontology_tree_children(
         project_id, service, ontology, user, resolved_branch, git
     )
 
-    nodes = await ontology.get_children_tree_nodes(
+    nodes = await indexed.get_children_tree_nodes(
         project_id, class_iri, project.label_preferences, resolved_branch
     )
-    total_classes = await ontology.get_class_count(project_id, resolved_branch)
+    total_classes = await indexed.get_class_count(project_id, resolved_branch)
 
     return OWLClassTreeResponse(nodes=nodes, total_classes=total_classes)
 
@@ -582,6 +622,7 @@ async def get_ontology_class(
     class_iri: str,
     service: Annotated[ProjectService, Depends(get_service)],
     ontology: Annotated[OntologyService, Depends(get_ontology)],
+    indexed: Annotated[IndexedOntologyService, Depends(get_indexed_ontology)],
     git: Annotated[GitRepositoryService, Depends(get_git)],
     user: OptionalUser,
     branch: str | None = Query(default=None, description="Branch to read from"),
@@ -596,7 +637,7 @@ async def get_ontology_class(
         project_id, service, ontology, user, resolved_branch, git
     )
 
-    result = await ontology.get_class(
+    result = await indexed.get_class(
         project_id, class_iri, project.label_preferences, resolved_branch
     )
     if not result:
@@ -615,6 +656,7 @@ async def get_ontology_class_ancestors(
     class_iri: str,
     service: Annotated[ProjectService, Depends(get_service)],
     ontology: Annotated[OntologyService, Depends(get_ontology)],
+    indexed: Annotated[IndexedOntologyService, Depends(get_indexed_ontology)],
     git: Annotated[GitRepositoryService, Depends(get_git)],
     user: OptionalUser,
     branch: str | None = Query(default=None, description="Branch to read from"),
@@ -631,10 +673,10 @@ async def get_ontology_class_ancestors(
         project_id, service, ontology, user, resolved_branch, git
     )
 
-    nodes = await ontology.get_ancestor_path(
+    nodes = await indexed.get_ancestor_path(
         project_id, class_iri, project.label_preferences, resolved_branch
     )
-    total_classes = await ontology.get_class_count(project_id, resolved_branch)
+    total_classes = await indexed.get_class_count(project_id, resolved_branch)
 
     return OWLClassTreeResponse(nodes=nodes, total_classes=total_classes)
 
@@ -644,6 +686,7 @@ async def search_ontology_entities(
     project_id: UUID,
     service: Annotated[ProjectService, Depends(get_service)],
     ontology: Annotated[OntologyService, Depends(get_ontology)],
+    indexed: Annotated[IndexedOntologyService, Depends(get_indexed_ontology)],
     git: Annotated[GitRepositoryService, Depends(get_git)],
     user: OptionalUser,
     q: str = Query(..., min_length=1, max_length=200, description="Search query"),
@@ -668,7 +711,7 @@ async def search_ontology_entities(
     if entity_types:
         parsed_types = [t.strip() for t in entity_types.split(",") if t.strip()]
 
-    return await ontology.search_entities(
+    return await indexed.search_entities(
         project_id,
         query=q,
         entity_types=parsed_types,
@@ -1168,6 +1211,16 @@ async def delete_branch(
             BranchMetadata.branch_name == branch_name,
         )
     )
+
+    # Clean up ontology index for deleted branch
+    try:
+        from ontokit.services.ontology_index import OntologyIndexService
+
+        index_service = OntologyIndexService(db)
+        await index_service.delete_branch_index(project_id, branch_name, auto_commit=False)
+    except Exception:
+        logger.warning("Failed to clean up ontology index for deleted branch", exc_info=True)
+
     await db.commit()
 
 
@@ -1308,8 +1361,6 @@ async def save_source_content(
 
             embed_config = await EmbeddingService(db).get_config(project_id)
             if embed_config and embed_config.auto_embed_on_save:
-                from ontokit.api.utils.redis import get_arq_pool
-
                 pool = await get_arq_pool()
                 if pool is None:
                     logger.warning(
@@ -1332,9 +1383,62 @@ async def save_source_content(
         except Exception:
             logger.warning("Failed to queue auto-embed", exc_info=True)
 
+    # Trigger ontology index rebuild
+    try:
+        pool = await get_arq_pool()
+        if pool is not None:
+            await pool.enqueue_job(
+                "run_ontology_index_task",
+                str(project_id),
+                current_branch,
+                commit_info.hash,
+            )
+    except Exception:
+        logger.warning("Failed to queue ontology re-index", exc_info=True)
+
     return SourceContentSaveResponse(
         success=True,
         commit_hash=commit_info.hash,
         commit_message=commit_info.message,
         branch=current_branch,
     )
+
+
+@router.post("/{project_id}/ontology/reindex", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_ontology_reindex(
+    project_id: UUID,
+    service: Annotated[ProjectService, Depends(get_service)],
+    git: Annotated[GitRepositoryService, Depends(get_git)],
+    user: RequiredUser,
+    branch: str | None = Query(default=None, description="Branch to reindex"),
+) -> dict[str, str]:
+    """
+    Manually trigger an ontology index rebuild (admin only).
+
+    Enqueues a background job to re-parse the Turtle file and rebuild
+    the PostgreSQL index tables for faster queries.
+    """
+    project = await service.get(project_id, user)
+
+    if project.user_role not in ("owner", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Must be an admin or owner to trigger reindexing",
+        )
+
+    resolved_branch = branch or git.get_default_branch(project_id)
+
+    pool = await get_arq_pool()
+    if pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Background job queue unavailable",
+        )
+
+    await pool.enqueue_job(
+        "run_ontology_index_task",
+        str(project_id),
+        resolved_branch,
+    )
+
+    return {"status": "accepted", "branch": resolved_branch}

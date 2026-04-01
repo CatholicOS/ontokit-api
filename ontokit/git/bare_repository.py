@@ -506,6 +506,18 @@ class BareOntologyRepository:
 
         return "main"
 
+    def get_branch_commit_hash(self, ref: str) -> str:
+        """Get the commit hash for a branch name or ref.
+
+        Args:
+            ref: Branch name, commit hash, or "HEAD"
+
+        Returns:
+            The full commit hash as a string
+        """
+        commit = self._resolve_ref(ref)
+        return str(commit.id)
+
     def list_branches(self) -> list[BranchInfo]:
         """List all branches with their metadata."""
         branches = []
