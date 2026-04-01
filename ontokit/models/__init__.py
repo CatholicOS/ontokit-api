@@ -10,6 +10,7 @@ from ontokit.models.lint import (
     LintRun,
     LintRunStatus,
 )
+from ontokit.models.normalization import NormalizationRun
 from ontokit.models.notification import Notification
 from ontokit.models.ontology_index import (
     IndexedAnnotation,
@@ -50,6 +51,7 @@ __all__ = [
     "LintIssueType",
     "LintRun",
     "LintRunStatus",
+    "NormalizationRun",
     "Notification",
     "OntologyIndexStatus",
     "PRStatus",

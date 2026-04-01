@@ -27,6 +27,7 @@ from ontokit.models import (  # noqa: E402, F401
     IndexedHierarchy,
     IndexedLabel,
     JoinRequest,
+    NormalizationRun,
     OntologyIndexStatus,
     Project,
     ProjectMember,
