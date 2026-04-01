@@ -63,7 +63,7 @@ class OWLClassResponse(OWLClassBase):
     equivalent_iris: list[str] | None = Field(default=None)
     disjoint_iris: list[str] | None = Field(default=None)
     child_count: int = 0
-    instance_count: int | None = 0
+    instance_count: int | None = None
     is_defined: bool = True  # vs just declared
     source_ontology: str | None = None  # If imported
     annotations: list[AnnotationProperty] = Field(
