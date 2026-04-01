@@ -1,5 +1,6 @@
 """ARQ worker for background task processing."""
 
+import json
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -31,6 +32,128 @@ logger = logging.getLogger(__name__)
 # Redis pubsub channels for updates
 LINT_UPDATES_CHANNEL = "lint:updates"
 NORMALIZATION_UPDATES_CHANNEL = "normalization:updates"
+
+
+ONTOLOGY_INDEX_UPDATES_CHANNEL = "ontology_index:updates"
+
+
+async def run_ontology_index_task(
+    ctx: dict[str, Any],
+    project_id: str,
+    branch: str = "main",
+    commit_hash: str | None = None,
+) -> dict[str, Any]:
+    """
+    Background task to build/rebuild the PostgreSQL ontology index.
+
+    Args:
+        ctx: ARQ context with db session and services
+        project_id: The project UUID to index
+        branch: The branch to index
+        commit_hash: The commit hash to record (if None, determined from git)
+
+    Returns:
+        Dict with entity_count and status
+    """
+    db: AsyncSession = ctx["db"]
+    redis: ArqRedis = ctx["redis"]
+
+    project_uuid = UUID(project_id)
+
+    try:
+        # Verify project exists
+        result = await db.execute(select(Project).where(Project.id == project_uuid))
+        project = result.scalar_one_or_none()
+
+        if not project:
+            raise ValueError(f"Project {project_id} not found")
+
+        if not project.source_file_path:
+            raise ValueError(f"Project {project_id} has no ontology file")
+
+        logger.info("Starting ontology index for project %s branch %s", project_id, branch)
+
+        # Notify start
+        await redis.publish(
+            ONTOLOGY_INDEX_UPDATES_CHANNEL,
+            json.dumps({"type": "index_started", "project_id": project_id, "branch": branch}),
+        )
+
+        # Load ontology from git or storage
+        import os
+
+        storage = get_storage_service()
+        ontology_service = get_ontology_service(storage)
+        filename = getattr(project, "git_ontology_path", None) or os.path.basename(
+            project.source_file_path
+        )
+
+        git_service = BareGitRepositoryService()
+        if git_service.repository_exists(project_uuid):
+            graph = await ontology_service.load_from_git(
+                project_uuid, branch, filename, git_service
+            )
+            # Determine commit hash from git if not provided
+            if commit_hash is None:
+                try:
+                    repo = git_service.get_repository(project_uuid)
+                    commit_hash = repo.get_branch_commit_hash(branch)
+                except Exception:
+                    commit_hash = "unknown"
+        else:
+            graph = await ontology_service.load_from_storage(
+                project_uuid, project.source_file_path, branch
+            )
+            if commit_hash is None:
+                commit_hash = "storage"
+
+        # Run indexing
+        from ontokit.services.ontology_index import OntologyIndexService
+
+        index_service = OntologyIndexService(db)
+        entity_count = await index_service.full_reindex(project_uuid, branch, graph, commit_hash)
+
+        # Notify completion
+        await redis.publish(
+            ONTOLOGY_INDEX_UPDATES_CHANNEL,
+            json.dumps(
+                {
+                    "type": "index_complete",
+                    "project_id": project_id,
+                    "branch": branch,
+                    "entity_count": entity_count,
+                }
+            ),
+        )
+
+        return {
+            "entity_count": entity_count,
+            "status": "completed",
+            "commit_hash": commit_hash,
+        }
+
+    except Exception as e:
+        logger.exception(
+            "Ontology index failed for project %s branch %s: %s",
+            project_id,
+            branch,
+            e,
+        )
+
+        # Notify failure
+        await redis.publish(
+            ONTOLOGY_INDEX_UPDATES_CHANNEL,
+            json.dumps(
+                {
+                    "type": "index_failed",
+                    "project_id": project_id,
+                    "branch": branch,
+                    "error": str(e),
+                }
+            ),
+        )
+
+        raise
 
 
 async def run_lint_task(
@@ -783,6 +906,7 @@ class WorkerSettings:
     """ARQ worker settings."""
 
     functions = [
+        run_ontology_index_task,
         run_lint_task,
         check_normalization_status_task,
         run_normalization_task,

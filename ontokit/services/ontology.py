@@ -780,6 +780,10 @@ class OntologyService:
             )
         return self._graphs[key]
 
+    def set_graph(self, project_id: UUID, branch: str, graph: Graph) -> None:
+        """Inject a pre-parsed graph into the cache (for testing/benchmarks)."""
+        self._graphs[(project_id, branch)] = graph
+
     def is_loaded(self, project_id: UUID, branch: str = "main") -> bool:
         """Check if a project's ontology graph is loaded in memory for a given branch."""
         return (project_id, branch) in self._graphs
