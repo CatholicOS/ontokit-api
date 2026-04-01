@@ -224,6 +224,10 @@ class RevisionHistoryResponse(BaseModel):
     project_id: UUID
     commits: list[RevisionCommit]
     total: int
+    refs: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Map of commit hash to branch names pointing at that commit",
+    )
 
 
 class RevisionDiffChange(BaseModel):
