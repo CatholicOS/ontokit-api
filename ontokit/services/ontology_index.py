@@ -651,8 +651,8 @@ class OntologyIndexService:
 
         # Instance counting via index is not supported —
         # RDF stores (individual, rdf:type, class) which we don't index as hierarchy.
-        # The RDFLib fallback handles accurate instance counts.
-        instance_count = 0
+        # Return None so the frontend can distinguish "not indexed" from "zero".
+        instance_count = None
 
         # Get annotations (excluding rdfs:comment and label properties
         # which are already returned via IndexedLabel)
@@ -701,8 +701,8 @@ class OntologyIndexService:
             "deprecated": entity.deprecated,
             "parent_iris": parent_iris,
             "parent_labels": parent_labels,
-            "equivalent_iris": [],
-            "disjoint_iris": [],
+            "equivalent_iris": None,
+            "disjoint_iris": None,
             "child_count": child_count,
             "instance_count": instance_count,
             "annotations": annotation_list,
