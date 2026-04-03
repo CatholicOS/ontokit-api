@@ -395,7 +395,15 @@ class SuggestionService:
         body_parts.append(f"\n**Entities modified** ({session.changes_count} changes):")
         for entity in entities:
             body_parts.append(f"- {entity}")
-        body_parts.append(f"\n*Submitted by {session.user_name or session.user_id}*")
+        is_anonymous = getattr(session, "is_anonymous", False)
+        if is_anonymous:
+            submitter_name = getattr(session, "submitter_name", None)
+            if submitter_name:
+                body_parts.append(f"\n*Submitted by {submitter_name}*")
+            else:
+                body_parts.append("\n*Submitted anonymously*")
+        else:
+            body_parts.append(f"\n*Submitted by {session.user_name or session.user_id}*")
         description = "\n".join(body_parts)
 
         # Check for an existing PR on this branch (idempotency on retry)
@@ -537,7 +545,17 @@ class SuggestionService:
                 pr_url = pr.github_pr_url if hasattr(pr, "github_pr_url") else None
                 github_pr_url = pr_url
 
-        submitter = SuggestionUser(id=s.user_id, name=s.user_name, email=s.user_email)
+        # For anonymous sessions, prefer submitter_name/email (credit info collected at submit)
+        # over the generic user_name/email set at session creation.
+        is_anonymous = getattr(s, "is_anonymous", False)
+        if is_anonymous:
+            submitter_name = getattr(s, "submitter_name", None) or s.user_name or "Anonymous"
+            submitter_email = getattr(s, "submitter_email", None) or s.user_email
+        else:
+            submitter_name = s.user_name
+            submitter_email = s.user_email
+
+        submitter = SuggestionUser(id=s.user_id, name=submitter_name, email=submitter_email)
         reviewer = None
         if s.reviewer_id:
             reviewer = SuggestionUser(
@@ -560,6 +578,7 @@ class SuggestionService:
             reviewed_at=s.reviewed_at,
             revision=s.revision,
             summary=s.summary,
+            is_anonymous=is_anonymous,
         )
 
     def _can_review(self, role: str | None, user: CurrentUser) -> bool:
