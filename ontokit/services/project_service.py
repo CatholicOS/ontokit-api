@@ -441,6 +441,7 @@ class ProjectService:
         skip: int = 0,
         limit: int = 20,
         filter_type: str | None = None,
+        search: str | None = None,
     ) -> ProjectListResponse:
         """
         List projects accessible to the user.
@@ -450,6 +451,7 @@ class ProjectService:
             skip: Pagination offset
             limit: Maximum results to return
             filter_type: Filter by 'public', 'mine', or None for all accessible
+            search: Case-insensitive search on name and description
         """
         # Build base query
         query = select(Project).options(
@@ -476,6 +478,16 @@ class ProjectService:
                         Project.id.in_(subquery),
                     )
                 )
+
+        # Apply search filter
+        if search:
+            search_pattern = f"%{search}%"
+            query = query.where(
+                or_(
+                    Project.name.ilike(search_pattern),
+                    Project.description.ilike(search_pattern),
+                )
+            )
 
         # Count total
         count_query = select(func.count()).select_from(query.subquery())

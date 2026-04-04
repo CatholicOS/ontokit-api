@@ -110,6 +110,9 @@ async def list_projects(
     filter: str | None = Query(
         default=None, description="Filter: 'public', 'mine', or null for all accessible"
     ),
+    search: str | None = Query(
+        default=None, max_length=200, description="Search by project name or description"
+    ),
 ) -> ProjectListResponse:
     """
     List projects accessible to the current user.
@@ -120,7 +123,9 @@ async def list_projects(
     - filter=mine: Projects where user is a member
     - filter=null: All accessible (public + user's projects)
     """
-    return await service.list_accessible(user, skip=skip, limit=limit, filter_type=filter)
+    return await service.list_accessible(
+        user, skip=skip, limit=limit, filter_type=filter, search=search
+    )
 
 
 @router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
