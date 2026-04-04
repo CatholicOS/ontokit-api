@@ -654,14 +654,12 @@ class OntologyIndexService:
         # Return None so the frontend can distinguish "not indexed" from "zero".
         instance_count = None
 
-        # Get annotations (excluding rdfs:comment and label properties
-        # which are already returned via IndexedLabel)
-        label_property_iris = {str(uri) for _, uri in LABEL_PROPERTIES}
-        excluded_iris = label_property_iris | {rdfs_comment_iri}
+        # Get annotations from IndexedAnnotation (excludes rdfs:comment which
+        # is returned separately as `comments`)
         annotations_result = await self.db.execute(
             select(IndexedAnnotation).where(
                 IndexedAnnotation.entity_id == entity.id,
-                IndexedAnnotation.property_iri.notin_(excluded_iris),
+                IndexedAnnotation.property_iri != rdfs_comment_iri,
             )
         )
         annotations_by_prop: dict[str, list[dict[str, str]]] = {}
@@ -673,6 +671,25 @@ class OntologyIndexService:
                 {
                     "value": ann.value,
                     "lang": ann.lang or "",
+                }
+            )
+
+        # Also include non-rdfs:label entries from IndexedLabel as annotations
+        # (skos:altLabel, skos:prefLabel, dcterms:title — these are translations/synonyms)
+        non_rdfs_labels_result = await self.db.execute(
+            select(IndexedLabel).where(
+                IndexedLabel.entity_id == entity.id,
+                IndexedLabel.property_iri != rdfs_label_iri,
+            )
+        )
+        for lbl in non_rdfs_labels_result.scalars().all():
+            key = lbl.property_iri
+            if key not in annotations_by_prop:
+                annotations_by_prop[key] = []
+            annotations_by_prop[key].append(
+                {
+                    "value": lbl.value,
+                    "lang": lbl.lang or "",
                 }
             )
 
