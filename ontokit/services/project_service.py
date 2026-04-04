@@ -441,6 +441,7 @@ class ProjectService:
         skip: int = 0,
         limit: int = 20,
         filter_type: str | None = None,
+        search: str | None = None,
     ) -> ProjectListResponse:
         """
         List projects accessible to the user.
@@ -450,6 +451,7 @@ class ProjectService:
             skip: Pagination offset
             limit: Maximum results to return
             filter_type: Filter by 'public', 'mine', or None for all accessible
+            search: Case-insensitive search on name and description
         """
         # Build base query
         query = select(Project).options(
@@ -463,8 +465,15 @@ class ProjectService:
             # Authenticated user
             if filter_type == "public":
                 query = query.where(Project.is_public == True)  # noqa: E712
+            elif filter_type == "private":
+                # Private projects where user is a member
+                subquery = select(ProjectMember.project_id).where(ProjectMember.user_id == user.id)
+                query = query.where(
+                    Project.is_public == False,  # noqa: E712
+                    Project.id.in_(subquery),
+                )
             elif filter_type == "mine":
-                # Projects where user is a member
+                # All projects where user is a member (public + private)
                 subquery = select(ProjectMember.project_id).where(ProjectMember.user_id == user.id)
                 query = query.where(Project.id.in_(subquery))
             else:
@@ -476,6 +485,17 @@ class ProjectService:
                         Project.id.in_(subquery),
                     )
                 )
+
+        # Apply search filter
+        if search:
+            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            search_pattern = f"%{escaped}%"
+            query = query.where(
+                or_(
+                    Project.name.ilike(search_pattern, escape="\\"),
+                    Project.description.ilike(search_pattern, escape="\\"),
+                )
+            )
 
         # Count total
         count_query = select(func.count()).select_from(query.subquery())
