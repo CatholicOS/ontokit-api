@@ -73,6 +73,7 @@ class SuggestionSessionSummary(BaseModel):
     reviewed_at: datetime | None = None
     revision: int | None = None
     summary: str | None = None
+    is_anonymous: bool = False
 
     class Config:
         from_attributes = True
