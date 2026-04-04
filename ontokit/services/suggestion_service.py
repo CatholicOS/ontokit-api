@@ -23,14 +23,14 @@ from sqlalchemy.orm import selectinload
 
 from ontokit.core.auth import CurrentUser
 from ontokit.core.beacon_token import create_beacon_token, verify_beacon_token
+from ontokit.git import GitRepositoryService, get_git_service
+from ontokit.models.project import Project
+from ontokit.models.suggestion_session import SuggestionSession, SuggestionSessionStatus
 from ontokit.schemas.anonymous_suggestion import (
     AnonymousSessionCreateResponse,
     AnonymousSubmitRequest,
     AnonymousSubmitResponse,
 )
-from ontokit.git import GitRepositoryService, get_git_service
-from ontokit.models.project import Project
-from ontokit.models.suggestion_session import SuggestionSession, SuggestionSessionStatus
 from ontokit.schemas.pull_request import PRCreate
 from ontokit.schemas.suggestion import (
     SuggestionBeaconRequest,
