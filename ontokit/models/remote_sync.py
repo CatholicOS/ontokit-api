@@ -1,4 +1,4 @@
-"""Upstream sync configuration and event models."""
+"""Remote sync configuration and event models."""
 
 import uuid
 from datetime import datetime
@@ -9,10 +9,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from ontokit.core.database import Base
 
 
-class UpstreamSyncConfig(Base):
-    """Configuration for tracking an upstream GitHub repository file."""
+class RemoteSyncConfig(Base):
+    """Configuration for tracking a remote GitHub repository file."""
 
-    __tablename__ = "upstream_sync_configs"
+    __tablename__ = "remote_sync_configs"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(
@@ -30,7 +30,7 @@ class UpstreamSyncConfig(Base):
     last_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_update_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    upstream_commit_sha: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    remote_commit_sha: Mapped[str | None] = mapped_column(String(255), nullable=True)
     pending_pr_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("pull_requests.id", ondelete="SET NULL"), nullable=True
     )
@@ -48,23 +48,23 @@ class UpstreamSyncConfig(Base):
 
     def __repr__(self) -> str:
         return (
-            f"<UpstreamSyncConfig(id={self.id}, project_id={self.project_id}, "
+            f"<RemoteSyncConfig(id={self.id}, project_id={self.project_id}, "
             f"repo={self.repo_owner}/{self.repo_name})>"
         )
 
 
 class SyncEvent(Base):
-    """Record of an upstream sync check or update event."""
+    """Record of a remote sync check or update event."""
 
     __tablename__ = "sync_events"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
     config_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("upstream_sync_configs.id", ondelete="CASCADE")
+        ForeignKey("remote_sync_configs.id", ondelete="CASCADE")
     )
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    upstream_commit_sha: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    remote_commit_sha: Mapped[str | None] = mapped_column(String(255), nullable=True)
     pr_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("pull_requests.id", ondelete="SET NULL"), nullable=True
     )
@@ -73,7 +73,7 @@ class SyncEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
-    config: Mapped["UpstreamSyncConfig"] = relationship(back_populates="events")
+    config: Mapped["RemoteSyncConfig"] = relationship(back_populates="events")
 
     def __repr__(self) -> str:
         return (

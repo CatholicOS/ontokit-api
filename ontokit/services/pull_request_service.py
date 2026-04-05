@@ -25,7 +25,7 @@ from ontokit.models.pull_request import (
     PullRequestReview,
     ReviewStatus,
 )
-from ontokit.models.upstream_sync import UpstreamSyncConfig
+from ontokit.models.remote_sync import RemoteSyncConfig
 from ontokit.models.user_github_token import UserGitHubToken
 from ontokit.schemas.project import ProjectRole
 from ontokit.schemas.pull_request import (
@@ -1139,21 +1139,21 @@ class PullRequestService:
 
         return self._to_github_integration_response(integration)
 
-    async def _sync_upstream_config_for_webhooks(
+    async def _sync_remote_config_for_webhooks(
         self,
         project_id: UUID,
         integration: GitHubIntegration,
         webhooks_enabled: bool,
     ) -> None:
-        """Create or update UpstreamSyncConfig when webhook state changes."""
+        """Create or update RemoteSyncConfig when webhook state changes."""
         result = await self.db.execute(
-            select(UpstreamSyncConfig).where(UpstreamSyncConfig.project_id == project_id)
+            select(RemoteSyncConfig).where(RemoteSyncConfig.project_id == project_id)
         )
         sync_config = result.scalar_one_or_none()
 
         if webhooks_enabled:
             if sync_config is None:
-                sync_config = UpstreamSyncConfig(
+                sync_config = RemoteSyncConfig(
                     project_id=project_id,
                     repo_owner=integration.repo_owner,
                     repo_name=integration.repo_name,
@@ -1218,9 +1218,9 @@ class PullRequestService:
         )
         self.git_service.setup_remote(project_id, remote_url)
 
-        # Auto-create upstream sync config when webhooks are enabled
+        # Auto-create remote sync config when webhooks are enabled
         if integration_create.webhooks_enabled:
-            await self._sync_upstream_config_for_webhooks(
+            await self._sync_remote_config_for_webhooks(
                 project_id, db_integration, webhooks_enabled=True
             )
 
@@ -1264,8 +1264,8 @@ class PullRequestService:
             if not integration_update.webhooks_enabled:
                 integration.github_hook_id = None
 
-            # Auto-create/update upstream sync config
-            await self._sync_upstream_config_for_webhooks(
+            # Auto-create/update remote sync config
+            await self._sync_remote_config_for_webhooks(
                 project_id, integration, integration_update.webhooks_enabled
             )
 

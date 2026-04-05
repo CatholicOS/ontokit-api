@@ -1,4 +1,4 @@
-"""Business logic for upstream sync configuration and event management."""
+"""Business logic for remote sync configuration and event management."""
 
 import logging
 from uuid import UUID
@@ -10,23 +10,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ontokit.api.utils.redis import get_arq_pool
 from ontokit.core.auth import CurrentUser
-from ontokit.models.upstream_sync import SyncEvent, UpstreamSyncConfig
-from ontokit.schemas.upstream_sync import (
+from ontokit.models.remote_sync import RemoteSyncConfig, SyncEvent
+from ontokit.schemas.remote_sync import (
+    RemoteSyncConfigCreate,
+    RemoteSyncConfigResponse,
+    RemoteSyncConfigUpdate,
     SyncCheckResponse,
     SyncEventResponse,
     SyncHistoryResponse,
     SyncJobStatusResponse,
-    UpstreamSyncConfigCreate,
-    UpstreamSyncConfigResponse,
-    UpstreamSyncConfigUpdate,
 )
 from ontokit.services.project_service import get_project_service
 
 logger = logging.getLogger(__name__)
 
 
-class UpstreamSyncService:
-    """Service for managing upstream sync configurations and events."""
+class RemoteSyncService:
+    """Service for managing remote sync configurations and events."""
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -52,53 +52,53 @@ class UpstreamSyncService:
         ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Admin access required to manage upstream sync configuration",
+                detail="Admin access required to manage remote sync configuration",
             )
 
         return project_response.user_role
 
     async def get_config(
         self, project_id: UUID, user: CurrentUser
-    ) -> UpstreamSyncConfigResponse | None:
-        """Get upstream sync configuration for a project.
+    ) -> RemoteSyncConfigResponse | None:
+        """Get remote sync configuration for a project.
 
         Returns None if no configuration exists.
         """
         await self._verify_access(project_id, user)
 
         result = await self.db.execute(
-            select(UpstreamSyncConfig).where(UpstreamSyncConfig.project_id == project_id)
+            select(RemoteSyncConfig).where(RemoteSyncConfig.project_id == project_id)
         )
         config = result.scalar_one_or_none()
 
         if not config:
             return None
 
-        return UpstreamSyncConfigResponse.model_validate(config)
+        return RemoteSyncConfigResponse.model_validate(config)
 
     async def save_config(
         self,
         project_id: UUID,
-        data: UpstreamSyncConfigCreate | UpstreamSyncConfigUpdate,
+        data: RemoteSyncConfigCreate | RemoteSyncConfigUpdate,
         user: CurrentUser,
-    ) -> UpstreamSyncConfigResponse:
-        """Create or update upstream sync configuration (PUT / upsert semantics)."""
+    ) -> RemoteSyncConfigResponse:
+        """Create or update remote sync configuration (PUT / upsert semantics)."""
         await self._verify_access(project_id, user, require_admin=True)
 
         result = await self.db.execute(
-            select(UpstreamSyncConfig).where(UpstreamSyncConfig.project_id == project_id)
+            select(RemoteSyncConfig).where(RemoteSyncConfig.project_id == project_id)
         )
         config = result.scalar_one_or_none()
 
         if config is None:
             # Create new config — require full payload
-            if isinstance(data, UpstreamSyncConfigUpdate):
+            if isinstance(data, RemoteSyncConfigUpdate):
                 # Treat partial update on non-existent config as create with defaults
-                config = UpstreamSyncConfig(project_id=project_id)
+                config = RemoteSyncConfig(project_id=project_id)
                 for field, value in data.model_dump(exclude_unset=True).items():
                     setattr(config, field, value)
             else:
-                config = UpstreamSyncConfig(
+                config = RemoteSyncConfig(
                     project_id=project_id,
                     **data.model_dump(),
                 )
@@ -112,46 +112,46 @@ class UpstreamSyncService:
         await self.db.commit()
         await self.db.refresh(config)
 
-        return UpstreamSyncConfigResponse.model_validate(config)
+        return RemoteSyncConfigResponse.model_validate(config)
 
     async def delete_config(self, project_id: UUID, user: CurrentUser) -> None:
-        """Delete upstream sync configuration."""
+        """Delete remote sync configuration."""
         await self._verify_access(project_id, user, require_admin=True)
 
         result = await self.db.execute(
-            select(UpstreamSyncConfig).where(UpstreamSyncConfig.project_id == project_id)
+            select(RemoteSyncConfig).where(RemoteSyncConfig.project_id == project_id)
         )
         config = result.scalar_one_or_none()
 
         if not config:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Upstream sync not configured for this project",
+                detail="Remote sync not configured for this project",
             )
 
         await self.db.delete(config)
         await self.db.commit()
 
     async def trigger_check(self, project_id: UUID, user: CurrentUser) -> SyncCheckResponse:
-        """Trigger a manual upstream sync check via background job."""
+        """Trigger a manual remote sync check via background job."""
         await self._verify_access(project_id, user, require_admin=True)
 
         # Verify config exists
         result = await self.db.execute(
-            select(UpstreamSyncConfig).where(UpstreamSyncConfig.project_id == project_id)
+            select(RemoteSyncConfig).where(RemoteSyncConfig.project_id == project_id)
         )
         config = result.scalar_one_or_none()
 
         if not config:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Upstream sync not configured for this project",
+                detail="Remote sync not configured for this project",
             )
 
         if config.status == "checking":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="An upstream check is already in progress",
+                detail="A remote check is already in progress",
             )
 
         # Update status to checking
@@ -160,7 +160,7 @@ class UpstreamSyncService:
 
         # Enqueue background job
         pool = await get_arq_pool()
-        job = await pool.enqueue_job("run_upstream_check_task", str(project_id))
+        job = await pool.enqueue_job("run_remote_check_task", str(project_id))
 
         if job is None:
             config.status = "error"
@@ -168,11 +168,11 @@ class UpstreamSyncService:
             await self.db.commit()
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to enqueue upstream check job",
+                detail="Failed to enqueue remote check job",
             )
 
         return SyncCheckResponse(
-            message="Upstream check has been queued",
+            message="Remote check has been queued",
             job_id=job.job_id,
             status="queued",
         )
@@ -253,6 +253,6 @@ class UpstreamSyncService:
         )
 
 
-def get_upstream_sync_service(db: AsyncSession) -> UpstreamSyncService:
+def get_remote_sync_service(db: AsyncSession) -> RemoteSyncService:
     """Factory function for dependency injection."""
-    return UpstreamSyncService(db)
+    return RemoteSyncService(db)

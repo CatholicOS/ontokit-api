@@ -29,8 +29,8 @@ from ontokit.models.pull_request import (
     PullRequestReview,
     ReviewStatus,
 )
+from ontokit.models.remote_sync import RemoteSyncConfig, SyncEvent
 from ontokit.models.suggestion_session import SuggestionSession, SuggestionSessionStatus
-from ontokit.models.upstream_sync import SyncEvent, UpstreamSyncConfig
 from ontokit.models.user_github_token import UserGitHubToken
 
 __all__ = [
@@ -65,6 +65,6 @@ __all__ = [
     "SuggestionSession",
     "SuggestionSessionStatus",
     "SyncEvent",
-    "UpstreamSyncConfig",
+    "RemoteSyncConfig",
     "UserGitHubToken",
 ]

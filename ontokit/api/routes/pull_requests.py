@@ -654,19 +654,19 @@ async def github_webhook(
             payload.get("commits", []),
         )
 
-        # Trigger upstream sync if configured for webhook frequency
+        # Trigger remote sync if configured for webhook frequency
         ref = payload.get("ref", "")
         if ref.startswith("refs/heads/"):
             push_branch = ref[len("refs/heads/") :]
             commits = payload.get("commits", [])
 
-            from ontokit.models.upstream_sync import UpstreamSyncConfig
+            from ontokit.models.remote_sync import RemoteSyncConfig
 
             sync_result = await service.db.execute(
-                select(UpstreamSyncConfig).where(
-                    UpstreamSyncConfig.project_id == project_id,
-                    UpstreamSyncConfig.enabled.is_(True),
-                    UpstreamSyncConfig.frequency == "webhook",
+                select(RemoteSyncConfig).where(
+                    RemoteSyncConfig.project_id == project_id,
+                    RemoteSyncConfig.enabled.is_(True),
+                    RemoteSyncConfig.frequency == "webhook",
                 )
             )
             sync_config = sync_result.scalar_one_or_none()
@@ -683,6 +683,6 @@ async def github_webhook(
                     await service.db.commit()
 
                     pool = await get_arq_pool()
-                    await pool.enqueue_job("run_upstream_check_task", str(project_id))
+                    await pool.enqueue_job("run_remote_check_task", str(project_id))
 
     return {"status": "ok"}
