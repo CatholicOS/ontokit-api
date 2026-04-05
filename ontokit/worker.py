@@ -24,8 +24,8 @@ from ontokit.services.normalization_service import NormalizationService
 from ontokit.services.ontology import get_ontology_service
 from ontokit.services.storage import get_storage_service
 
-# Redis pubsub channels for upstream sync updates
-UPSTREAM_SYNC_UPDATES_CHANNEL = "upstream_sync:updates"
+# Redis pubsub channels for remote sync updates
+REMOTE_SYNC_UPDATES_CHANNEL = "remote_sync:updates"
 
 logger = logging.getLogger(__name__)
 
@@ -661,14 +661,14 @@ async def sync_github_projects(ctx: dict[str, Any]) -> dict[str, Any]:
         raise
 
 
-async def run_upstream_check_task(
+async def run_remote_check_task(
     ctx: dict[str, Any],
     project_id: str,
 ) -> dict[str, Any]:
     """
-    Background task to check an upstream GitHub repository for changes.
+    Background task to check a remote GitHub repository for changes.
 
-    Compares the upstream file content with the current project ontology
+    Compares the remote file content with the current project ontology
     and records a SyncEvent with the outcome.
     """
     db: AsyncSession = ctx["db"]
@@ -677,17 +677,17 @@ async def run_upstream_check_task(
     project_uuid = UUID(project_id)
 
     try:
-        from ontokit.models.upstream_sync import SyncEvent, UpstreamSyncConfig
+        from ontokit.models.remote_sync import RemoteSyncConfig, SyncEvent
         from ontokit.services.github_service import get_github_service
 
         # Get sync config
         config_result = await db.execute(
-            select(UpstreamSyncConfig).where(UpstreamSyncConfig.project_id == project_uuid)
+            select(RemoteSyncConfig).where(RemoteSyncConfig.project_id == project_uuid)
         )
         config = config_result.scalar_one_or_none()
 
         if not config:
-            return {"status": "failed", "error": "Upstream sync not configured"}
+            return {"status": "failed", "error": "Remote sync not configured"}
 
         # Get project
         project_result = await db.execute(select(Project).where(Project.id == project_uuid))
@@ -698,8 +698,8 @@ async def run_upstream_check_task(
 
         # Notify start
         await redis.publish(
-            UPSTREAM_SYNC_UPDATES_CHANNEL,
-            f'{{"type": "upstream_check_started", "project_id": "{project_id}"}}',
+            REMOTE_SYNC_UPDATES_CHANNEL,
+            f'{{"type": "remote_check_started", "project_id": "{project_id}"}}',
         )
 
         # Get a GitHub token — try the project's connected user first
@@ -721,7 +721,7 @@ async def run_upstream_check_task(
 
         if not token:
             config.status = "error"
-            config.error_message = "No GitHub token available for upstream check"
+            config.error_message = "No GitHub token available for remote check"
             event = SyncEvent(
                 project_id=project_uuid,
                 config_id=config.id,
@@ -732,9 +732,9 @@ async def run_upstream_check_task(
             await db.commit()
             return {"status": "failed", "error": "No GitHub token available"}
 
-        # Fetch upstream file content
+        # Fetch remote file content
         github_service = get_github_service()
-        upstream_content = await github_service.get_file_content(
+        remote_content = await github_service.get_file_content(
             token=token,
             owner=config.repo_owner,
             repo=config.repo_name,
@@ -758,12 +758,12 @@ async def run_upstream_check_task(
                 logger.warning(f"Could not load current ontology for project {project_id}")
 
         # Compare contents
-        has_changes = current_content is None or upstream_content != current_content
+        has_changes = current_content is None or remote_content != current_content
 
         if has_changes:
             event_type = "update_found"
             config.status = "update_available"
-            changes_summary = "Upstream file differs from local ontology"
+            changes_summary = "Remote file differs from local ontology"
         else:
             event_type = "check_no_changes"
             config.status = "up_to_date"
@@ -782,14 +782,14 @@ async def run_upstream_check_task(
         await db.commit()
 
         logger.info(
-            f"Upstream check for project {project_id}: "
+            f"Remote check for project {project_id}: "
             f"{'changes found' if has_changes else 'up to date'}"
         )
 
         # Notify completion
         await redis.publish(
-            UPSTREAM_SYNC_UPDATES_CHANNEL,
-            f'{{"type": "upstream_check_complete", "project_id": "{project_id}", '
+            REMOTE_SYNC_UPDATES_CHANNEL,
+            f'{{"type": "remote_check_complete", "project_id": "{project_id}", '
             f'"has_changes": {str(has_changes).lower()}}}',
         )
 
@@ -801,12 +801,12 @@ async def run_upstream_check_task(
         }
 
     except Exception as e:
-        logger.exception(f"Upstream check failed for project {project_id}: {e}")
+        logger.exception(f"Remote check failed for project {project_id}: {e}")
 
         # Record error event
         try:
             err_result = await db.execute(
-                select(UpstreamSyncConfig).where(UpstreamSyncConfig.project_id == project_uuid)
+                select(RemoteSyncConfig).where(RemoteSyncConfig.project_id == project_uuid)
             )
             config = err_result.scalar_one_or_none()
             if config:
@@ -821,13 +821,12 @@ async def run_upstream_check_task(
                 db.add(event)
                 await db.commit()
         except Exception:
-            logger.exception("Failed to record upstream check error event")
+            logger.exception("Failed to record remote check error event")
 
         # Notify failure
         await redis.publish(
-            UPSTREAM_SYNC_UPDATES_CHANNEL,
-            f'{{"type": "upstream_check_failed", "project_id": "{project_id}", '
-            f'"error": "{str(e)}"}}',
+            REMOTE_SYNC_UPDATES_CHANNEL,
+            f'{{"type": "remote_check_failed", "project_id": "{project_id}", "error": "{str(e)}"}}',
         )
 
         raise
@@ -916,7 +915,7 @@ class WorkerSettings:
         run_embedding_generation_task,
         run_single_entity_embed_task,
         run_batch_entity_embed_task,
-        run_upstream_check_task,
+        run_remote_check_task,
     ]
     redis_settings = get_redis_settings()
 

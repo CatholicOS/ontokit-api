@@ -16,10 +16,10 @@ from ontokit.api.routes import (
     properties,
     pull_requests,
     quality,
+    remote_sync,
     search,
     semantic_search,
     suggestions,
-    upstream_sync,
     user_settings,
 )
 
@@ -39,7 +39,7 @@ router.include_router(ontologies.router, prefix="/ontologies", tags=["Ontologies
 router.include_router(classes.router, tags=["Classes"])
 router.include_router(properties.router, tags=["Properties"])
 router.include_router(suggestions.router, prefix="/projects", tags=["Suggestions"])
-router.include_router(upstream_sync.router, prefix="/projects", tags=["Upstream Sync"])
+router.include_router(remote_sync.router, prefix="/projects", tags=["Remote Sync"])
 router.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
 router.include_router(search.router, prefix="/search", tags=["Search"])
 router.include_router(user_settings.router, prefix="/users", tags=["User Settings"])
