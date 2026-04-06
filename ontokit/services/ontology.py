@@ -530,14 +530,64 @@ class OntologyService:
                     else:
                         _add_edge(str(disj), node_iri, "disjointWith", "disjointWith")
 
+        # Extract seeAlso targets from OWL restrictions on rdfs:seeAlso
+        def _get_see_also_targets(uri: URIRef) -> list[URIRef]:
+            """Extract seeAlso targets from both direct triples and OWL restrictions.
+
+            FOLIO encodes seeAlso as owl:Restriction with owl:someValuesFrom
+            inside rdfs:subClassOf, not as direct rdfs:seeAlso triples.
+            """
+            targets: list[URIRef] = []
+            # Direct rdfs:seeAlso triples
+            for obj in graph.objects(uri, RDFS.seeAlso):
+                if isinstance(obj, URIRef):
+                    targets.append(obj)
+            # OWL restrictions: subClassOf -> Restriction(onProperty=seeAlso, someValuesFrom=X)
+            for sc in graph.objects(uri, RDFS.subClassOf):
+                if isinstance(sc, URIRef):
+                    continue  # Named superclass, not a restriction
+                # sc is a blank node (restriction)
+                on_prop = next(graph.objects(sc, OWL.onProperty), None)
+                if on_prop == RDFS.seeAlso:
+                    for val in graph.objects(sc, OWL.someValuesFrom):
+                        if isinstance(val, URIRef):
+                            targets.append(val)
+                    for val in graph.objects(sc, OWL.allValuesFrom):
+                        if isinstance(val, URIRef):
+                            targets.append(val)
+                    for val in graph.objects(sc, OWL.hasValue):
+                        if isinstance(val, URIRef):
+                            targets.append(val)
+            return targets
+
+        def _get_see_also_referrers(uri: URIRef) -> list[URIRef]:
+            """Find classes that have seeAlso restrictions pointing TO this URI."""
+            referrers: list[URIRef] = []
+            # Direct reverse rdfs:seeAlso
+            for subj in graph.subjects(RDFS.seeAlso, uri):
+                if isinstance(subj, URIRef):
+                    referrers.append(subj)
+            # Find restrictions that someValuesFrom -> uri
+            for restriction in graph.subjects(OWL.someValuesFrom, uri):
+                on_prop = next(graph.objects(restriction, OWL.onProperty), None)
+                if on_prop == RDFS.seeAlso:
+                    for cls in graph.subjects(RDFS.subClassOf, restriction):
+                        if isinstance(cls, URIRef) and (cls, RDF.type, OWL.Class) in graph:
+                            referrers.append(cls)
+            return referrers
+
         # Collect seeAlso cross-links
+        # Outgoing seeAlso: checked on all visited nodes (focus + ancestors)
+        # Incoming seeAlso: only checked on the focus node (intermediates are too noisy)
         see_also_nodes: list[URIRef] = []
         if include_see_also:
             for node_iri in list(visited.keys()):
                 node_uri = URIRef(node_iri)
                 sa_count = 0
-                for related in graph.objects(node_uri, RDFS.seeAlso):
-                    if not isinstance(related, URIRef) or sa_count >= max_see_also_per_node:
+
+                # Outgoing: this node seeAlso -> related
+                for related in _get_see_also_targets(node_uri):
+                    if sa_count >= max_see_also_per_node:
                         break
                     related_iri = str(related)
                     was_new = related_iri not in visited
@@ -546,11 +596,23 @@ class OntologyService:
                         if related_node is None:
                             continue
                         see_also_nodes.append(related)
-                    if node_iri < related_iri:
-                        _add_edge(node_iri, related_iri, "seeAlso", "rdfs:seeAlso")
-                    else:
-                        _add_edge(related_iri, node_iri, "seeAlso", "rdfs:seeAlso")
+                    _add_edge(node_iri, related_iri, "seeAlso", "rdfs:seeAlso")
                     sa_count += 1
+
+                # Incoming: only on the focus node to avoid cascade
+                if node_uri == class_uri:
+                    for referrer in _get_see_also_referrers(node_uri):
+                        if sa_count >= max_see_also_per_node:
+                            break
+                        referrer_iri = str(referrer)
+                        was_new = referrer_iri not in visited
+                        if was_new:
+                            referrer_node = _make_node(referrer, 0)
+                            if referrer_node is None:
+                                continue
+                            see_also_nodes.append(referrer)
+                        _add_edge(referrer_iri, node_iri, "seeAlso", "rdfs:seeAlso")
+                        sa_count += 1
 
         # BFS upward from seeAlso nodes to their roots
         if see_also_nodes:
@@ -571,6 +633,12 @@ class OntologyService:
                     if parent_iri not in sa_visited:
                         sa_visited.add(parent_iri)
                         sa_queue.append((parent, current_depth + 1))
+
+        # Reclassify roots: primary roots (from subClassOf BFS) stay "root",
+        # roots discovered via seeAlso branches become "secondary_root"
+        for node in visited.values():
+            if node.node_type == "root" and node.iri not in ancestor_visited:
+                node.node_type = "secondary_root"
 
         truncated = total_discovered[0] > len(visited)
 
