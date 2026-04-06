@@ -33,6 +33,7 @@ from ontokit.git import GitRepositoryService, get_git_service
 from ontokit.models.branch_metadata import BranchMetadata
 from ontokit.models.pull_request import GitHubIntegration, PRStatus, PullRequest
 from ontokit.models.user_github_token import UserGitHubToken
+from ontokit.schemas.graph import EntityGraphResponse
 from ontokit.schemas.owl_class import EntitySearchResponse, OWLClassResponse, OWLClassTreeResponse
 from ontokit.schemas.project import (
     BranchCreate,
@@ -719,6 +720,49 @@ async def get_ontology_class_ancestors(
     total_classes = await indexed.get_class_count(project_id, resolved_branch)
 
     return OWLClassTreeResponse(nodes=nodes, total_classes=total_classes)
+
+
+@router.get(
+    "/{project_id}/ontology/classes/{class_iri:path}/graph",
+    response_model=EntityGraphResponse,
+)
+async def get_ontology_class_graph(
+    project_id: UUID,
+    class_iri: str,
+    service: Annotated[ProjectService, Depends(get_service)],
+    ontology: Annotated[OntologyService, Depends(get_ontology)],
+    git: Annotated[GitRepositoryService, Depends(get_git)],
+    user: OptionalUser,
+    branch: str | None = Query(default=None, description="Branch to read from"),
+    ancestors_depth: int = Query(default=5, ge=0, le=10),
+    descendants_depth: int = Query(default=2, ge=0, le=10),
+    max_nodes: int = Query(default=200, ge=1, le=500),
+    include_see_also: bool = Query(default=True),
+) -> EntityGraphResponse:
+    """Build a multi-hop entity graph around a class via BFS.
+
+    Returns nodes and edges for visualization, with lineage-based node types.
+    """
+    resolved_branch = branch or git.get_default_branch(project_id)
+    await _ensure_ontology_loaded(
+        project_id, service, ontology, user, resolved_branch, git
+    )
+
+    result = await ontology.build_entity_graph(
+        project_id,
+        class_iri,
+        branch=resolved_branch,
+        ancestors_depth=ancestors_depth,
+        descendants_depth=descendants_depth,
+        max_nodes=max_nodes,
+        include_see_also=include_see_also,
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Class not found: {class_iri}",
+        )
+    return result
 
 
 @router.get("/{project_id}/ontology/search", response_model=EntitySearchResponse)
