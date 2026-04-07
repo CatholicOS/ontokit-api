@@ -41,9 +41,15 @@ def authed_client() -> Generator[tuple[TestClient, AsyncMock], None, None]:
     async def _override_get_db() -> Any:
         yield mock_session
 
+    async def _override_get_current_user() -> CurrentUser:
+        return user
+
+    async def _override_get_current_user_optional() -> CurrentUser | None:
+        return user
+
     app.dependency_overrides[get_db] = _override_get_db
-    app.dependency_overrides[get_current_user] = lambda: user
-    app.dependency_overrides[get_current_user_optional] = lambda: user
+    app.dependency_overrides[get_current_user] = _override_get_current_user
+    app.dependency_overrides[get_current_user_optional] = _override_get_current_user_optional
 
     client = TestClient(app, raise_server_exceptions=False)
     yield client, mock_session
