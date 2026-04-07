@@ -231,7 +231,7 @@ class TestFullReindex:
         result = await service.full_reindex(PROJECT_ID, BRANCH, sample_graph, COMMIT_HASH)
         # The sample graph has Person, Organization as owl:Class, worksFor as ObjectProperty,
         # hasName as DatatypeProperty = 4 entities
-        assert result > 0
+        assert result == 4
 
 
 # ---------------------------------------------------------------------------
