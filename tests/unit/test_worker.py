@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -18,7 +19,7 @@ from ontokit.worker import (
 
 
 @pytest.fixture
-def mock_ctx(mock_db_session: AsyncMock, mock_redis: AsyncMock) -> dict:
+def mock_ctx(mock_db_session: AsyncMock, mock_redis: AsyncMock) -> dict[str, Any]:
     """Create a minimal ARQ context dict with mock db and redis."""
     return {"db": mock_db_session, "redis": mock_redis}
 
@@ -38,7 +39,9 @@ class TestRunOntologyIndexTask:
     """Tests for the run_ontology_index_task background function."""
 
     @pytest.mark.asyncio
-    async def test_project_not_found_raises(self, mock_ctx: dict, project_id: str) -> None:
+    async def test_project_not_found_raises(
+        self, mock_ctx: dict[str, Any], project_id: str
+    ) -> None:
         """Raises ValueError when the project does not exist in the DB."""
         mock_result = Mock()
         mock_result.scalar_one_or_none.return_value = None
@@ -48,7 +51,9 @@ class TestRunOntologyIndexTask:
             await run_ontology_index_task(mock_ctx, project_id)
 
     @pytest.mark.asyncio
-    async def test_project_no_source_file_raises(self, mock_ctx: dict, project_id: str) -> None:
+    async def test_project_no_source_file_raises(
+        self, mock_ctx: dict[str, Any], project_id: str
+    ) -> None:
         """Raises ValueError when the project has no source_file_path."""
         project = Mock()
         project.source_file_path = None
@@ -61,7 +66,7 @@ class TestRunOntologyIndexTask:
 
     @pytest.mark.asyncio
     async def test_successful_index_returns_completed(
-        self, mock_ctx: dict, project_id: str
+        self, mock_ctx: dict[str, Any], project_id: str
     ) -> None:
         """Successful indexing returns status=completed with entity_count."""
         project = Mock()
@@ -99,7 +104,7 @@ class TestRunOntologyIndexTask:
 
     @pytest.mark.asyncio
     async def test_index_publishes_start_and_complete(
-        self, mock_ctx: dict, project_id: str
+        self, mock_ctx: dict[str, Any], project_id: str
     ) -> None:
         """Redis publish is called for both start and complete notifications."""
         project = Mock()
@@ -129,7 +134,9 @@ class TestRunOntologyIndexTask:
         assert mock_ctx["redis"].publish.await_count >= 2
 
     @pytest.mark.asyncio
-    async def test_index_uses_storage_fallback(self, mock_ctx: dict, project_id: str) -> None:
+    async def test_index_uses_storage_fallback(
+        self, mock_ctx: dict[str, Any], project_id: str
+    ) -> None:
         """When git repo does not exist, falls back to storage loading."""
         project = Mock()
         project.source_file_path = "ontokit/test.ttl"
@@ -157,7 +164,9 @@ class TestRunOntologyIndexTask:
         onto_svc.load_from_storage.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_index_failure_publishes_error(self, mock_ctx: dict, project_id: str) -> None:
+    async def test_index_failure_publishes_error(
+        self, mock_ctx: dict[str, Any], project_id: str
+    ) -> None:
         """On failure, publishes an index_failed message and re-raises."""
         project = Mock()
         project.source_file_path = "ontokit/test.ttl"
@@ -193,7 +202,9 @@ class TestRunLintTask:
     """Tests for the run_lint_task background function."""
 
     @pytest.mark.asyncio
-    async def test_lint_project_not_found_raises(self, mock_ctx: dict, project_id: str) -> None:
+    async def test_lint_project_not_found_raises(
+        self, mock_ctx: dict[str, Any], project_id: str
+    ) -> None:
         """Raises ValueError when the project does not exist."""
         mock_result = Mock()
         mock_result.scalar_one_or_none.return_value = None
@@ -203,7 +214,9 @@ class TestRunLintTask:
             await run_lint_task(mock_ctx, project_id)
 
     @pytest.mark.asyncio
-    async def test_lint_no_source_file_raises(self, mock_ctx: dict, project_id: str) -> None:
+    async def test_lint_no_source_file_raises(
+        self, mock_ctx: dict[str, Any], project_id: str
+    ) -> None:
         """Raises ValueError when the project has no source_file_path."""
         project = Mock()
         project.source_file_path = None
@@ -215,7 +228,9 @@ class TestRunLintTask:
             await run_lint_task(mock_ctx, project_id)
 
     @pytest.mark.asyncio
-    async def test_lint_success_returns_completed(self, mock_ctx: dict, project_id: str) -> None:
+    async def test_lint_success_returns_completed(
+        self, mock_ctx: dict[str, Any], project_id: str
+    ) -> None:
         """Successful lint returns status=completed with issues count."""
         project = Mock()
         project.source_file_path = "ontokit/test.ttl"
@@ -256,7 +271,9 @@ class TestRunLintTask:
         assert result["issues_found"] == 1
 
     @pytest.mark.asyncio
-    async def test_lint_publishes_notifications(self, mock_ctx: dict, project_id: str) -> None:
+    async def test_lint_publishes_notifications(
+        self, mock_ctx: dict[str, Any], project_id: str
+    ) -> None:
         """Lint task publishes start and complete events to Redis."""
         project = Mock()
         project.source_file_path = "ontokit/test.ttl"
@@ -292,7 +309,7 @@ class TestStartupShutdown:
     @pytest.mark.asyncio
     async def test_startup_creates_engine_and_factory(self) -> None:
         """startup populates ctx with engine and session_factory."""
-        ctx: dict = {}
+        ctx: dict[str, Any] = {}
         with patch("ontokit.worker.create_async_engine") as mock_engine_fn:
             mock_engine = Mock()
             mock_engine_fn.return_value = mock_engine
@@ -310,14 +327,14 @@ class TestStartupShutdown:
     async def test_shutdown_disposes_engine(self) -> None:
         """shutdown calls engine.dispose()."""
         mock_engine = AsyncMock()
-        ctx = {"engine": mock_engine}
+        ctx: dict[str, Any] = {"engine": mock_engine}
         await shutdown(ctx)
         mock_engine.dispose.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_shutdown_without_engine(self) -> None:
         """shutdown is a no-op when engine is missing from ctx."""
-        ctx: dict = {}
+        ctx: dict[str, Any] = {}
         await shutdown(ctx)  # should not raise
 
 
@@ -329,7 +346,7 @@ class TestJobLifecycle:
         """on_job_start creates a db session from the factory."""
         mock_session = Mock()
         mock_factory = Mock(return_value=mock_session)
-        ctx = {"session_factory": mock_factory}
+        ctx: dict[str, Any] = {"session_factory": mock_factory}
 
         await on_job_start(ctx)
 
@@ -340,7 +357,7 @@ class TestJobLifecycle:
     async def test_on_job_end_closes_session(self) -> None:
         """on_job_end closes the db session."""
         mock_session = AsyncMock()
-        ctx = {"db": mock_session}
+        ctx: dict[str, Any] = {"db": mock_session}
 
         await on_job_end(ctx)
 
@@ -349,5 +366,5 @@ class TestJobLifecycle:
     @pytest.mark.asyncio
     async def test_on_job_end_without_session(self) -> None:
         """on_job_end is a no-op when db is missing from ctx."""
-        ctx: dict = {}
+        ctx: dict[str, Any] = {}
         await on_job_end(ctx)  # should not raise

@@ -25,36 +25,36 @@ class TestMessageType:
 
     def test_connection_lifecycle_values(self) -> None:
         """Connection lifecycle message types have correct string values."""
-        assert MessageType.AUTHENTICATE == "authenticate"
-        assert MessageType.AUTHENTICATED == "authenticated"
-        assert MessageType.ERROR == "error"
+        assert MessageType.AUTHENTICATE == "authenticate"  # type: ignore[comparison-overlap]
+        assert MessageType.AUTHENTICATED == "authenticated"  # type: ignore[comparison-overlap]
+        assert MessageType.ERROR == "error"  # type: ignore[comparison-overlap]
 
     def test_room_management_values(self) -> None:
         """Room management message types have correct string values."""
-        assert MessageType.JOIN == "join"
-        assert MessageType.LEAVE == "leave"
-        assert MessageType.USER_LIST == "user_list"
+        assert MessageType.JOIN == "join"  # type: ignore[comparison-overlap]
+        assert MessageType.LEAVE == "leave"  # type: ignore[comparison-overlap]
+        assert MessageType.USER_LIST == "user_list"  # type: ignore[comparison-overlap]
 
     def test_presence_values(self) -> None:
         """Presence message types have correct string values."""
-        assert MessageType.PRESENCE_UPDATE == "presence_update"
-        assert MessageType.CURSOR_MOVE == "cursor_move"
+        assert MessageType.PRESENCE_UPDATE == "presence_update"  # type: ignore[comparison-overlap]
+        assert MessageType.CURSOR_MOVE == "cursor_move"  # type: ignore[comparison-overlap]
 
     def test_operation_values(self) -> None:
         """Operation message types have correct string values."""
-        assert MessageType.OPERATION == "operation"
-        assert MessageType.OPERATION_ACK == "operation_ack"
-        assert MessageType.OPERATION_REJECT == "operation_reject"
+        assert MessageType.OPERATION == "operation"  # type: ignore[comparison-overlap]
+        assert MessageType.OPERATION_ACK == "operation_ack"  # type: ignore[comparison-overlap]
+        assert MessageType.OPERATION_REJECT == "operation_reject"  # type: ignore[comparison-overlap]
 
     def test_sync_values(self) -> None:
         """Sync message types have correct string values."""
-        assert MessageType.SYNC_REQUEST == "sync_request"
-        assert MessageType.SYNC_RESPONSE == "sync_response"
+        assert MessageType.SYNC_REQUEST == "sync_request"  # type: ignore[comparison-overlap]
+        assert MessageType.SYNC_RESPONSE == "sync_response"  # type: ignore[comparison-overlap]
 
     def test_is_strenum(self) -> None:
         """MessageType values are strings."""
         assert isinstance(MessageType.JOIN, str)
-        assert MessageType.JOIN == "join"
+        assert MessageType.JOIN == "join"  # type: ignore[comparison-overlap]
 
 
 class TestOperationType:
@@ -62,39 +62,39 @@ class TestOperationType:
 
     def test_class_operations(self) -> None:
         """Class operation types have correct string values."""
-        assert OperationType.ADD_CLASS == "add_class"
-        assert OperationType.UPDATE_CLASS == "update_class"
-        assert OperationType.DELETE_CLASS == "delete_class"
-        assert OperationType.MOVE_CLASS == "move_class"
+        assert OperationType.ADD_CLASS == "add_class"  # type: ignore[comparison-overlap]
+        assert OperationType.UPDATE_CLASS == "update_class"  # type: ignore[comparison-overlap]
+        assert OperationType.DELETE_CLASS == "delete_class"  # type: ignore[comparison-overlap]
+        assert OperationType.MOVE_CLASS == "move_class"  # type: ignore[comparison-overlap]
 
     def test_property_operations(self) -> None:
         """Property operation types have correct string values."""
-        assert OperationType.ADD_OBJECT_PROPERTY == "add_object_property"
-        assert OperationType.ADD_DATA_PROPERTY == "add_data_property"
-        assert OperationType.ADD_ANNOTATION_PROPERTY == "add_annotation_property"
-        assert OperationType.UPDATE_PROPERTY == "update_property"
-        assert OperationType.DELETE_PROPERTY == "delete_property"
+        assert OperationType.ADD_OBJECT_PROPERTY == "add_object_property"  # type: ignore[comparison-overlap]
+        assert OperationType.ADD_DATA_PROPERTY == "add_data_property"  # type: ignore[comparison-overlap]
+        assert OperationType.ADD_ANNOTATION_PROPERTY == "add_annotation_property"  # type: ignore[comparison-overlap]
+        assert OperationType.UPDATE_PROPERTY == "update_property"  # type: ignore[comparison-overlap]
+        assert OperationType.DELETE_PROPERTY == "delete_property"  # type: ignore[comparison-overlap]
 
     def test_individual_operations(self) -> None:
         """Individual operation types have correct string values."""
-        assert OperationType.ADD_INDIVIDUAL == "add_individual"
-        assert OperationType.UPDATE_INDIVIDUAL == "update_individual"
-        assert OperationType.DELETE_INDIVIDUAL == "delete_individual"
+        assert OperationType.ADD_INDIVIDUAL == "add_individual"  # type: ignore[comparison-overlap]
+        assert OperationType.UPDATE_INDIVIDUAL == "update_individual"  # type: ignore[comparison-overlap]
+        assert OperationType.DELETE_INDIVIDUAL == "delete_individual"  # type: ignore[comparison-overlap]
 
     def test_axiom_operations(self) -> None:
         """Axiom operation types have correct string values."""
-        assert OperationType.ADD_AXIOM == "add_axiom"
-        assert OperationType.REMOVE_AXIOM == "remove_axiom"
+        assert OperationType.ADD_AXIOM == "add_axiom"  # type: ignore[comparison-overlap]
+        assert OperationType.REMOVE_AXIOM == "remove_axiom"  # type: ignore[comparison-overlap]
 
     def test_annotation_operations(self) -> None:
         """Annotation operation types have correct string values."""
-        assert OperationType.SET_ANNOTATION == "set_annotation"
-        assert OperationType.REMOVE_ANNOTATION == "remove_annotation"
+        assert OperationType.SET_ANNOTATION == "set_annotation"  # type: ignore[comparison-overlap]
+        assert OperationType.REMOVE_ANNOTATION == "remove_annotation"  # type: ignore[comparison-overlap]
 
     def test_import_operations(self) -> None:
         """Import operation types have correct string values."""
-        assert OperationType.ADD_IMPORT == "add_import"
-        assert OperationType.REMOVE_IMPORT == "remove_import"
+        assert OperationType.ADD_IMPORT == "add_import"  # type: ignore[comparison-overlap]
+        assert OperationType.REMOVE_IMPORT == "remove_import"  # type: ignore[comparison-overlap]
 
 
 class TestOperation:
@@ -149,7 +149,7 @@ class TestOperation:
     def test_missing_required_field_raises(self) -> None:
         """Missing a required field raises a ValidationError."""
         with pytest.raises(ValidationError):
-            Operation(
+            Operation(  # type: ignore[call-arg]
                 type=OperationType.ADD_CLASS,
                 path="/classes/Person",
                 timestamp=datetime.now(tz=UTC),
@@ -163,7 +163,7 @@ class TestOperation:
         with pytest.raises(ValidationError):
             Operation(
                 id="abc-123",
-                type="not_a_real_type",
+                type="not_a_real_type",  # type: ignore[arg-type]
                 path="/classes/Person",
                 timestamp=datetime.now(tz=UTC),
                 user_id="user1",
@@ -214,7 +214,7 @@ class TestUser:
     def test_missing_required_field_raises(self) -> None:
         """Missing required fields raise a ValidationError."""
         with pytest.raises(ValidationError):
-            User(
+            User(  # type: ignore[call-arg]
                 user_id="user1",
                 display_name="Alice",
                 # missing client_type and client_version
@@ -295,7 +295,7 @@ class TestJoinPayload:
     def test_missing_field_raises(self) -> None:
         """Missing required fields raise a ValidationError."""
         with pytest.raises(ValidationError):
-            JoinPayload(user_id="user1")
+            JoinPayload(user_id="user1")  # type: ignore[call-arg]
 
 
 class TestOperationPayload:
@@ -317,7 +317,7 @@ class TestOperationPayload:
     def test_missing_operation_raises(self) -> None:
         """Missing operation field raises a ValidationError."""
         with pytest.raises(ValidationError):
-            OperationPayload()
+            OperationPayload()  # type: ignore[call-arg]
 
 
 class TestCursorPayload:
