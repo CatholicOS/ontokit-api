@@ -145,8 +145,8 @@ class TestCreate:
         await service.create(data, owner)
 
         assert mock_db.add.called
-        assert mock_db.flush.called
-        assert mock_db.commit.called
+        mock_db.flush.assert_awaited()
+        mock_db.commit.assert_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +220,7 @@ class TestUpdate:
         update_data = ProjectUpdate(name="New Name")
 
         await service.update(PROJECT_ID, update_data, owner)
-        assert mock_db.commit.called
+        mock_db.commit.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_update_project_denied_for_editor(
@@ -265,8 +265,8 @@ class TestDelete:
         owner = _make_user(user_id=OWNER_ID)
         await service.delete(PROJECT_ID, owner)
 
-        assert mock_db.delete.called
-        assert mock_db.commit.called
+        mock_db.delete.assert_awaited()
+        mock_db.commit.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_delete_project_denied_for_admin(
@@ -358,7 +358,7 @@ class TestAddMember:
             await service.add_member(PROJECT_ID, member_data, owner)
 
         assert mock_db.add.called
-        assert mock_db.commit.called
+        mock_db.commit.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_add_member_as_owner_role_rejected(
