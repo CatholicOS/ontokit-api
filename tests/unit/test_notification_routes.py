@@ -102,7 +102,7 @@ class TestListNotifications:
 
         response = client.get("/api/v1/notifications", params={"unread_only": "true"})
         assert response.status_code == 200
-        mock_notification_service.list_notifications.assert_called_once_with(
+        mock_notification_service.list_notifications.assert_awaited_once_with(
             "test-user-id", unread_only=True
         )
 
