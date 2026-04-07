@@ -261,7 +261,7 @@ class TestDeleteBranchIndex:
     ) -> None:
         """With auto_commit=True, commits after deletion."""
         await service.delete_branch_index(PROJECT_ID, BRANCH, auto_commit=True)
-        assert mock_db.commit.called
+        mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_auto_commit_false(
@@ -269,4 +269,4 @@ class TestDeleteBranchIndex:
     ) -> None:
         """With auto_commit=False, does not commit."""
         await service.delete_branch_index(PROJECT_ID, BRANCH, auto_commit=False)
-        assert not mock_db.commit.called
+        mock_db.commit.assert_not_awaited()
