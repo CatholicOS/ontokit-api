@@ -156,7 +156,7 @@ class BareOntologyRepository:
 
         # Try as partial hash
         try:
-            for commit in self.repo.walk(self.repo.head.target, pygit2.GIT_SORT_TIME):  # type: ignore[arg-type]
+            for commit in self.repo.walk(self.repo.head.target, pygit2.enums.SortMode.TIME):
                 if str(commit.id).startswith(ref):
                     return commit
         except Exception:
@@ -361,7 +361,7 @@ class BareOntologyRepository:
                 for ref_name in self.repo.references:
                     if ref_name.startswith("refs/heads/"):
                         ref = self.repo.references[ref_name]
-                        for commit in self.repo.walk(ref.target, pygit2.GIT_SORT_TIME):  # type: ignore[arg-type]
+                        for commit in self.repo.walk(ref.target, pygit2.enums.SortMode.TIME):
                             commit_hash = str(commit.id)
                             if commit_hash not in seen_hashes:
                                 seen_hashes.add(commit_hash)
@@ -380,8 +380,11 @@ class BareOntologyRepository:
 
                 commit_iter = []
                 for count, commit in enumerate(
-                    self.repo.walk(target, pygit2.GIT_SORT_TIME | pygit2.GIT_SORT_TOPOLOGICAL)
-                ):  # type: ignore[arg-type]
+                    self.repo.walk(
+                        target,
+                        pygit2.enums.SortMode.TIME | pygit2.enums.SortMode.TOPOLOGICAL,
+                    )
+                ):
                     commit_iter.append(commit)
                     if count + 1 >= limit:
                         break
@@ -748,10 +751,10 @@ class BareOntologyRepository:
 
             # Get commits reachable from to_ref but not from from_ref
             from_ancestors = set()
-            for commit in self.repo.walk(from_commit.id, pygit2.GIT_SORT_TIME):  # type: ignore[arg-type]
+            for commit in self.repo.walk(from_commit.id, pygit2.enums.SortMode.TIME):
                 from_ancestors.add(str(commit.id))
 
-            for commit in self.repo.walk(to_commit.id, pygit2.GIT_SORT_TIME):  # type: ignore[arg-type]
+            for commit in self.repo.walk(to_commit.id, pygit2.enums.SortMode.TIME):
                 if str(commit.id) in from_ancestors:
                     break
                 commits.append(self._commit_to_info(commit))

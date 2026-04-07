@@ -116,7 +116,7 @@ def auth_token() -> str:
 
 
 @pytest.fixture
-def sample_project_data() -> dict:
+def sample_project_data() -> dict[str, object]:
     """Provide sample project data as a dictionary."""
     return {
         "id": uuid.UUID("12345678-1234-5678-1234-567812345678"),
@@ -147,7 +147,9 @@ def mock_arq_pool() -> AsyncMock:
 def bare_git_repo(tmp_path: Path, sample_ontology_turtle: str) -> BareOntologyRepository:
     """Create a real pygit2 bare repo with an initial Turtle commit."""
     repo_path = tmp_path / "test-project.git"
-    pygit2.init_repository(str(repo_path), bare=True)
+    raw_repo = pygit2.init_repository(str(repo_path), bare=True)
+    # Ensure HEAD points to refs/heads/main regardless of system git config
+    raw_repo.set_head("refs/heads/main")
 
     repo = BareOntologyRepository(repo_path)
     repo.write_file(
