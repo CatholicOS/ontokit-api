@@ -166,7 +166,7 @@ class TestGet:
         mock_result.scalar_one_or_none.return_value = project
         mock_db.execute.return_value = mock_result
 
-        response = service._to_response(project, None)
+        response = await service.get(project.id, None)
         assert response.is_public is True
         assert response.user_role is None
 
