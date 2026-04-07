@@ -361,7 +361,10 @@ class BareOntologyRepository:
                 for ref_name in self.repo.references:
                     if ref_name.startswith("refs/heads/"):
                         ref = self.repo.references[ref_name]
-                        for commit in self.repo.walk(ref.target, pygit2.enums.SortMode.TIME):
+                        for commit in self.repo.walk(
+                            ref.target,
+                            pygit2.enums.SortMode.TIME | pygit2.enums.SortMode.TOPOLOGICAL,
+                        ):
                             commit_hash = str(commit.id)
                             if commit_hash not in seen_hashes:
                                 seen_hashes.add(commit_hash)
