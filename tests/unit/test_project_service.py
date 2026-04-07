@@ -142,11 +142,15 @@ class TestCreate:
 
         mock_db.refresh.side_effect = _simulate_refresh
 
-        await service.create(data, owner)
+        result = await service.create(data, owner)
 
         assert mock_db.add.called
         mock_db.flush.assert_awaited()
         mock_db.commit.assert_awaited()
+        assert result.name == "My Ontology"
+        assert result.description == "desc"
+        assert result.is_public is True
+        assert result.owner_id == OWNER_ID
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +172,24 @@ class TestGet:
         response = await service.get(project.id, None)
         assert response.is_public is True
         assert response.user_role is None
+
+    @pytest.mark.asyncio
+    async def test_get_private_project_as_member(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """A private project is accessible to a member."""
+        project = _make_project(
+            is_public=False,
+            members=[_make_member(OWNER_ID, "owner"), _make_member(EDITOR_ID, "editor")],
+        )
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = mock_result
+
+        member = _make_user(user_id=EDITOR_ID)
+        response = await service.get(project.id, member)
+        assert response.is_public is False
+        assert response.user_role == "editor"
 
     @pytest.mark.asyncio
     async def test_get_private_project_denied_for_non_member(
@@ -355,10 +377,13 @@ class TestAddMember:
             )
             mock_us.return_value = mock_user_service
 
-            await service.add_member(PROJECT_ID, member_data, owner)
+            result = await service.add_member(PROJECT_ID, member_data, owner)
 
         assert mock_db.add.called
         mock_db.commit.assert_awaited()
+        mock_user_service.get_user_info.assert_awaited_once()
+        assert result.user_id == "new-user-id"
+        assert result.role == "editor"
 
     @pytest.mark.asyncio
     async def test_add_member_as_owner_role_rejected(
