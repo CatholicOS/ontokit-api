@@ -10,8 +10,8 @@ def default_settings() -> Settings:
     """Create a Settings instance with defaults (ignoring .env file)."""
     return Settings(
         _env_file=None,
-        database_url="postgresql+asyncpg://test:test@localhost:5432/test",
-        redis_url="redis://localhost:6379/0",
+        database_url="postgresql+asyncpg://test:test@localhost:5432/test",  # type: ignore[arg-type]
+        redis_url="redis://localhost:6379/0",  # type: ignore[arg-type]
     )
 
 
@@ -38,8 +38,8 @@ class TestSuperadminIds:
         s = Settings(
             _env_file=None,
             superadmin_user_ids="",
-            database_url="postgresql+asyncpg://test:test@localhost:5432/test",
-            redis_url="redis://localhost:6379/0",
+            database_url="postgresql+asyncpg://test:test@localhost:5432/test",  # type: ignore[arg-type]
+            redis_url="redis://localhost:6379/0",  # type: ignore[arg-type]
         )
         assert s.superadmin_ids == set()
 
@@ -48,8 +48,8 @@ class TestSuperadminIds:
         s = Settings(
             _env_file=None,
             superadmin_user_ids="user1",
-            database_url="postgresql+asyncpg://test:test@localhost:5432/test",
-            redis_url="redis://localhost:6379/0",
+            database_url="postgresql+asyncpg://test:test@localhost:5432/test",  # type: ignore[arg-type]
+            redis_url="redis://localhost:6379/0",  # type: ignore[arg-type]
         )
         assert s.superadmin_ids == {"user1"}
 
@@ -58,8 +58,8 @@ class TestSuperadminIds:
         s = Settings(
             _env_file=None,
             superadmin_user_ids="user1,user2",
-            database_url="postgresql+asyncpg://test:test@localhost:5432/test",
-            redis_url="redis://localhost:6379/0",
+            database_url="postgresql+asyncpg://test:test@localhost:5432/test",  # type: ignore[arg-type]
+            redis_url="redis://localhost:6379/0",  # type: ignore[arg-type]
         )
         assert s.superadmin_ids == {"user1", "user2"}
 
@@ -68,8 +68,8 @@ class TestSuperadminIds:
         s = Settings(
             _env_file=None,
             superadmin_user_ids=" user1 , user2 ",
-            database_url="postgresql+asyncpg://test:test@localhost:5432/test",
-            redis_url="redis://localhost:6379/0",
+            database_url="postgresql+asyncpg://test:test@localhost:5432/test",  # type: ignore[arg-type]
+            redis_url="redis://localhost:6379/0",  # type: ignore[arg-type]
         )
         assert s.superadmin_ids == {"user1", "user2"}
 
@@ -78,8 +78,8 @@ class TestSuperadminIds:
         s = Settings(
             _env_file=None,
             superadmin_user_ids="user1,user2,",
-            database_url="postgresql+asyncpg://test:test@localhost:5432/test",
-            redis_url="redis://localhost:6379/0",
+            database_url="postgresql+asyncpg://test:test@localhost:5432/test",  # type: ignore[arg-type]
+            redis_url="redis://localhost:6379/0",  # type: ignore[arg-type]
         )
         assert s.superadmin_ids == {"user1", "user2"}
 
@@ -92,8 +92,8 @@ class TestEnvironmentProperties:
         s = Settings(
             _env_file=None,
             app_env="development",
-            database_url="postgresql+asyncpg://test:test@localhost:5432/test",
-            redis_url="redis://localhost:6379/0",
+            database_url="postgresql+asyncpg://test:test@localhost:5432/test",  # type: ignore[arg-type]
+            redis_url="redis://localhost:6379/0",  # type: ignore[arg-type]
         )
         assert s.is_development is True
         assert s.is_production is False
@@ -103,8 +103,8 @@ class TestEnvironmentProperties:
         s = Settings(
             _env_file=None,
             app_env="production",
-            database_url="postgresql+asyncpg://test:test@localhost:5432/test",
-            redis_url="redis://localhost:6379/0",
+            database_url="postgresql+asyncpg://test:test@localhost:5432/test",  # type: ignore[arg-type]
+            redis_url="redis://localhost:6379/0",  # type: ignore[arg-type]
         )
         assert s.is_production is True
         assert s.is_development is False
@@ -114,8 +114,8 @@ class TestEnvironmentProperties:
         s = Settings(
             _env_file=None,
             app_env="staging",
-            database_url="postgresql+asyncpg://test:test@localhost:5432/test",
-            redis_url="redis://localhost:6379/0",
+            database_url="postgresql+asyncpg://test:test@localhost:5432/test",  # type: ignore[arg-type]
+            redis_url="redis://localhost:6379/0",  # type: ignore[arg-type]
         )
         assert s.is_development is False
         assert s.is_production is False
@@ -130,8 +130,8 @@ class TestZitadelJwksBaseUrl:
             _env_file=None,
             zitadel_issuer="https://auth.example.com",
             zitadel_internal_url=None,
-            database_url="postgresql+asyncpg://test:test@localhost:5432/test",
-            redis_url="redis://localhost:6379/0",
+            database_url="postgresql+asyncpg://test:test@localhost:5432/test",  # type: ignore[arg-type]
+            redis_url="redis://localhost:6379/0",  # type: ignore[arg-type]
         )
         assert s.zitadel_jwks_base_url == "https://auth.example.com"
 
@@ -141,7 +141,7 @@ class TestZitadelJwksBaseUrl:
             _env_file=None,
             zitadel_issuer="https://auth.example.com",
             zitadel_internal_url="http://zitadel:8080",
-            database_url="postgresql+asyncpg://test:test@localhost:5432/test",
-            redis_url="redis://localhost:6379/0",
+            database_url="postgresql+asyncpg://test:test@localhost:5432/test",  # type: ignore[arg-type]
+            redis_url="redis://localhost:6379/0",  # type: ignore[arg-type]
         )
         assert s.zitadel_jwks_base_url == "http://zitadel:8080"

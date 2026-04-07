@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 from fastapi.testclient import TestClient
@@ -73,9 +74,12 @@ class TestSaveGitHubToken:
             mock_session.execute.return_value = mock_result
 
             now = datetime.now(UTC)
-            mock_session.refresh.side_effect = lambda obj: (
-                setattr(obj, "created_at", now) or setattr(obj, "updated_at", now)
-            )
+
+            def _fake_refresh(obj: Any) -> None:
+                obj.created_at = now
+                obj.updated_at = now
+
+            mock_session.refresh.side_effect = _fake_refresh
 
             response = client.post(
                 "/api/v1/users/me/github-token",
