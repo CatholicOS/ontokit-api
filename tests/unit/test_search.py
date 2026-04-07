@@ -9,7 +9,7 @@ from rdflib.namespace import OWL, RDF, RDFS
 from ontokit.schemas.search import SearchQuery, SPARQLQuery
 from ontokit.services.search import SearchService, _sanitize_tsquery_input
 
-DUMMY_PROJECT_ID = str(uuid4())
+DUMMY_PROJECT_ID = uuid4()
 
 
 # ---------------------------------------------------------------------------
