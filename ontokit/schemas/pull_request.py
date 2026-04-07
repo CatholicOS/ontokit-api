@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # Status types
 PRStatusType = Literal["open", "merged", "closed"]
@@ -71,8 +71,7 @@ class PRResponse(PRBase):
     commits_ahead: int = 0
     can_merge: bool = False
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PRListResponse(BaseModel):
@@ -124,8 +123,7 @@ class ReviewResponse(BaseModel):
     github_review_id: int | None = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReviewListResponse(BaseModel):
@@ -169,8 +167,7 @@ class CommentResponse(CommentBase):
     updated_at: datetime | None = None
     replies: list["CommentResponse"] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CommentListResponse(BaseModel):
@@ -272,8 +269,7 @@ class GitHubIntegrationResponse(BaseModel):
     created_at: datetime
     updated_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
     @property
     def computed_repo_url(self) -> str:

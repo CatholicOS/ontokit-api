@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 from ontokit.schemas.ontology import LocalizedString
 
@@ -80,8 +80,7 @@ class OWLClassResponse(OWLClassBase):
         description="Additional annotation properties (DC, SKOS, etc.)",
     )
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OWLClassListResponse(BaseModel):
@@ -99,8 +98,7 @@ class OWLClassTreeNode(BaseModel):
     child_count: int = Field(0, description="Number of direct subclasses")
     deprecated: bool = False
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OWLClassTreeResponse(BaseModel):

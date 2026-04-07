@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 from ontokit.schemas.ontology import LocalizedString
 
@@ -78,8 +78,7 @@ class OWLPropertyResponse(OWLPropertyBase):
     usage_count: int = 0
     source_ontology: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OWLPropertyListResponse(BaseModel):

@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _IRI_PATTERN = re.compile(r"^(https?://|urn:)\S+$")
 
@@ -82,8 +82,7 @@ class OntologyResponse(OntologyBase):
     property_count: int = 0
     individual_count: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OntologyListResponse(BaseModel):

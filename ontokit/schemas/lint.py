@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # Type definitions
 LintIssueTypeValue = Literal["error", "warning", "info"]
@@ -36,8 +36,7 @@ class LintIssueResponse(LintIssueBase):
     created_at: datetime
     resolved_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LintRunBase(BaseModel):
@@ -62,8 +61,7 @@ class LintRunResponse(LintRunBase):
     issues_found: int | None = None
     error_message: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LintRunDetailResponse(LintRunResponse):
@@ -71,8 +69,7 @@ class LintRunDetailResponse(LintRunResponse):
 
     issues: list[LintIssueResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LintSummaryResponse(BaseModel):
