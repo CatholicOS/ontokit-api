@@ -115,3 +115,9 @@ warn_required_dynamic_aliases = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-v --cov=ontokit --cov-report=term-missing"
+
+[tool.coverage.run]
+omit = [
+    # Deprecated GitPython implementation, replaced by bare_repository.py
+    "ontokit/git/repository.py",
+]
