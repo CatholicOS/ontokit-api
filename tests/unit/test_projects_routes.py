@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Generator
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,7 +25,7 @@ def mock_db_client() -> Generator[TestClient]:
 
     This avoids real database connections for routes that depend on ``get_db``.
     """
-    mock_session = AsyncMock()
+    mock_session = MagicMock()
 
     async def _override_get_db() -> AsyncGenerator[AsyncSession]:
         yield mock_session

@@ -115,7 +115,3 @@ warn_required_dynamic_aliases = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-v --cov=ontokit --cov-report=term-missing"
-filterwarnings = [
-    # AsyncMock coroutines from TestClient/anyio teardown are harmless
-    "ignore:coroutine 'AsyncMockMixin._execute_mock_call' was never awaited:RuntimeWarning",
-]
