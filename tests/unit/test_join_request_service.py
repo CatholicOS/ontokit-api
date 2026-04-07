@@ -432,7 +432,7 @@ class TestToResponse:
     def test_response_with_responder(self, service: JoinRequestService) -> None:
         """_to_response includes responder info when available."""
         jr = _make_join_request(responded_by=ADMIN_ID)
-        user_info = {
+        user_info: dict[str, dict[str, str | None]] = {
             ADMIN_ID: {"name": "Admin User", "email": "admin@example.com"},
         }
         response = service._to_response(jr, user_info)
