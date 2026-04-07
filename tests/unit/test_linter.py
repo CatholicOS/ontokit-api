@@ -5,7 +5,13 @@ from uuid import uuid4
 from rdflib import Graph, Literal, Namespace
 from rdflib.namespace import OWL, RDF, RDFS
 
-from ontokit.services.linter import LintResult, OntologyLinter
+from ontokit.services.linter import (
+    LINT_RULES,
+    LintResult,
+    OntologyLinter,
+    get_available_rules,
+    get_linter,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -315,3 +321,210 @@ async def test_lint_no_enabled_rules() -> None:
     issues = await linter.lint(g, PROJECT_ID)
 
     assert issues == []
+
+
+# ---------------------------------------------------------------------------
+# 11. get_available_rules / get_linter factory
+# ---------------------------------------------------------------------------
+
+
+def test_get_available_rules_returns_all() -> None:
+    """get_available_rules returns a copy of all defined rules."""
+    rules = get_available_rules()
+    assert len(rules) == len(LINT_RULES)
+    # Verify it is a copy, not the same object
+    assert rules is not LINT_RULES
+
+
+def test_get_linter_all_rules() -> None:
+    """get_linter() with no args enables all rules."""
+    linter = get_linter()
+    assert linter.enabled_rules == {r.rule_id for r in LINT_RULES}
+
+
+def test_get_linter_specific_rules() -> None:
+    """get_linter(enabled_rules=...) enables only specified rules."""
+    linter = get_linter(enabled_rules={"missing-label", "orphan-class"})
+    assert linter.enabled_rules == {"missing-label", "orphan-class"}
+
+
+def test_get_enabled_rules_method() -> None:
+    """get_enabled_rules returns LintRuleInfo objects for enabled rules only."""
+    linter = OntologyLinter(enabled_rules={"missing-label"})
+    enabled = linter.get_enabled_rules()
+    assert len(enabled) == 1
+    assert enabled[0].rule_id == "missing-label"
+
+
+# ---------------------------------------------------------------------------
+# 12. label-per-language
+# ---------------------------------------------------------------------------
+
+
+async def test_label_per_language_multiple_labels() -> None:
+    """Multiple different labels for the same language trigger label-per-language."""
+    g = Graph()
+    g.add((EX.Animal, RDF.type, OWL.Class))
+    g.add((EX.Animal, RDFS.label, Literal("Animal", lang="en")))
+    g.add((EX.Animal, RDFS.label, Literal("Beast", lang="en")))
+
+    linter = OntologyLinter(enabled_rules={"label-per-language"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "label-per-language")
+    assert len(matches) == 1
+    assert matches[0].issue_type == "error"
+    assert matches[0].subject_iri == str(EX.Animal)
+
+
+async def test_label_per_language_no_issue_when_same() -> None:
+    """Identical labels for the same language do not trigger label-per-language."""
+    g = Graph()
+    g.add((EX.Animal, RDF.type, OWL.Class))
+    g.add((EX.Animal, RDFS.label, Literal("Animal", lang="en")))
+
+    linter = OntologyLinter(enabled_rules={"label-per-language"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "label-per-language")
+    assert len(matches) == 0
+
+
+# ---------------------------------------------------------------------------
+# 13. domain-violation
+# ---------------------------------------------------------------------------
+
+
+async def test_domain_violation() -> None:
+    """Using a property on a subject outside its declared domain triggers a warning."""
+    g = Graph()
+    g.bind("ex", EX)
+
+    g.add((EX.Person, RDF.type, OWL.Class))
+    g.add((EX.Animal, RDF.type, OWL.Class))
+    g.add((EX.worksFor, RDF.type, OWL.ObjectProperty))
+    g.add((EX.worksFor, RDFS.domain, EX.Person))
+
+    # Use worksFor on an Animal instance — domain violation
+    g.add((EX.fido, RDF.type, EX.Animal))
+    g.add((EX.fido, EX.worksFor, EX.someOrg))
+
+    linter = OntologyLinter(enabled_rules={"domain-violation"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "domain-violation")
+    assert len(matches) >= 1
+    assert matches[0].issue_type == "warning"
+
+
+# ---------------------------------------------------------------------------
+# 14. range-violation
+# ---------------------------------------------------------------------------
+
+
+async def test_range_violation() -> None:
+    """Using an object property with an object outside declared range triggers a warning."""
+    g = Graph()
+    g.bind("ex", EX)
+
+    g.add((EX.Organization, RDF.type, OWL.Class))
+    g.add((EX.Person, RDF.type, OWL.Class))
+    g.add((EX.worksFor, RDF.type, OWL.ObjectProperty))
+    g.add((EX.worksFor, RDFS.range, EX.Organization))
+
+    # fido worksFor another Person — range violation
+    g.add((EX.fido, EX.worksFor, EX.alice))
+    g.add((EX.alice, RDF.type, EX.Person))
+
+    linter = OntologyLinter(enabled_rules={"range-violation"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "range-violation")
+    assert len(matches) >= 1
+    assert matches[0].issue_type == "warning"
+
+
+# ---------------------------------------------------------------------------
+# 15. disjoint-violation
+# ---------------------------------------------------------------------------
+
+
+async def test_disjoint_violation() -> None:
+    """An instance typed with two disjoint classes triggers a disjoint-violation error."""
+    g = Graph()
+    g.bind("ex", EX)
+
+    g.add((EX.Cat, RDF.type, OWL.Class))
+    g.add((EX.Dog, RDF.type, OWL.Class))
+    g.add((EX.Cat, OWL.disjointWith, EX.Dog))
+
+    # Instance is both Cat and Dog
+    g.add((EX.pet, RDF.type, EX.Cat))
+    g.add((EX.pet, RDF.type, EX.Dog))
+
+    linter = OntologyLinter(enabled_rules={"disjoint-violation"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "disjoint-violation")
+    assert len(matches) == 1
+    assert matches[0].issue_type == "error"
+    assert matches[0].subject_iri == str(EX.pet)
+
+
+# ---------------------------------------------------------------------------
+# 16. inverse-property-inconsistency
+# ---------------------------------------------------------------------------
+
+
+async def test_inverse_property_inconsistency() -> None:
+    """Missing inverse assertion triggers inverse-property-inconsistency."""
+    g = Graph()
+    g.bind("ex", EX)
+
+    g.add((EX.hasPart, RDF.type, OWL.ObjectProperty))
+    g.add((EX.partOf, RDF.type, OWL.ObjectProperty))
+    g.add((EX.hasPart, OWL.inverseOf, EX.partOf))
+
+    # Forward assertion without inverse
+    g.add((EX.car, EX.hasPart, EX.engine))
+    # Missing: EX.engine EX.partOf EX.car
+
+    linter = OntologyLinter(enabled_rules={"inverse-property-inconsistency"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "inverse-property-inconsistency")
+    assert len(matches) >= 1
+    assert matches[0].issue_type == "warning"
+
+
+# ---------------------------------------------------------------------------
+# 17. missing-english-label
+# ---------------------------------------------------------------------------
+
+
+async def test_missing_english_label() -> None:
+    """A class with labels only in non-English languages triggers missing-english-label."""
+    g = Graph()
+    g.add((EX.Chose, RDF.type, OWL.Class))
+    g.add((EX.Chose, RDFS.label, Literal("Chose", lang="fr")))
+
+    linter = OntologyLinter(enabled_rules={"missing-english-label"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "missing-english-label")
+    assert len(matches) == 1
+    assert matches[0].issue_type == "warning"
+
+
+async def test_no_missing_english_label_when_present() -> None:
+    """A class with an English label does not trigger missing-english-label."""
+    g = Graph()
+    g.add((EX.Thing, RDF.type, OWL.Class))
+    g.add((EX.Thing, RDFS.label, Literal("Thing", lang="en")))
+    g.add((EX.Thing, RDFS.label, Literal("Chose", lang="fr")))
+
+    linter = OntologyLinter(enabled_rules={"missing-english-label"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "missing-english-label")
+    assert len(matches) == 0

@@ -9,12 +9,17 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
 from ontokit.worker import (
+    check_normalization_status_task,
     on_job_end,
     on_job_start,
+    run_embedding_generation_task,
     run_lint_task,
+    run_normalization_task,
     run_ontology_index_task,
+    run_remote_check_task,
     shutdown,
     startup,
+    sync_github_projects,
 )
 
 
@@ -368,3 +373,282 @@ class TestJobLifecycle:
         """on_job_end is a no-op when db is missing from ctx."""
         ctx: dict[str, Any] = {}
         await on_job_end(ctx)  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# run_normalization_task
+# ---------------------------------------------------------------------------
+
+
+class TestRunNormalizationTask:
+    """Tests for the run_normalization_task background function."""
+
+    @pytest.mark.asyncio
+    async def test_normalization_success(self, mock_ctx: dict[str, Any], project_id: str) -> None:
+        """Successful normalization returns status=completed."""
+        project = Mock()
+        project.source_file_path = "ontokit/test.ttl"
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_ctx["db"].execute.return_value = mock_result
+
+        mock_run = MagicMock()
+        mock_run.id = uuid.uuid4()
+        mock_run.commit_hash = "abc123"
+
+        with (
+            patch("ontokit.worker.get_storage_service"),
+            patch("ontokit.worker.NormalizationService") as mock_norm_cls,
+        ):
+            norm_svc = mock_norm_cls.return_value
+            norm_svc.run_normalization = AsyncMock(
+                return_value=(mock_run, b"original", b"normalized")
+            )
+
+            result = await run_normalization_task(
+                mock_ctx, project_id, user_id="user-1", user_name="Test", user_email="t@t.com"
+            )
+
+        assert result["status"] == "completed"
+        assert result["run_id"] == str(mock_run.id)
+
+    @pytest.mark.asyncio
+    async def test_normalization_project_not_found(
+        self, mock_ctx: dict[str, Any], project_id: str
+    ) -> None:
+        """Returns status=failed when project not found."""
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_ctx["db"].execute.return_value = mock_result
+
+        result = await run_normalization_task(mock_ctx, project_id)
+
+        assert result["status"] == "failed"
+        assert "not found" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# check_normalization_status_task
+# ---------------------------------------------------------------------------
+
+
+class TestCheckNormalizationStatusTask:
+    """Tests for the check_normalization_status_task background function."""
+
+    @pytest.mark.asyncio
+    async def test_check_normalization_success(
+        self, mock_ctx: dict[str, Any], project_id: str
+    ) -> None:
+        """Returns needs_normalization status when check succeeds."""
+        project = Mock()
+        project.source_file_path = "ontokit/test.ttl"
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_ctx["db"].execute.return_value = mock_result
+
+        with (
+            patch("ontokit.worker.get_storage_service"),
+            patch("ontokit.worker.NormalizationService") as mock_norm_cls,
+        ):
+            norm_svc = mock_norm_cls.return_value
+            norm_svc.check_normalization_status = AsyncMock(
+                return_value={"needs_normalization": True, "last_run": None}
+            )
+
+            result = await check_normalization_status_task(mock_ctx, project_id)
+
+        assert result["needs_normalization"] is True
+
+    @pytest.mark.asyncio
+    async def test_check_normalization_project_not_found(
+        self, mock_ctx: dict[str, Any], project_id: str
+    ) -> None:
+        """Returns needs_normalization=False when project not found."""
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_ctx["db"].execute.return_value = mock_result
+
+        result = await check_normalization_status_task(mock_ctx, project_id)
+
+        assert result["needs_normalization"] is False
+        assert "not found" in result.get("error", "").lower()
+
+    @pytest.mark.asyncio
+    async def test_check_normalization_no_source_file(
+        self, mock_ctx: dict[str, Any], project_id: str
+    ) -> None:
+        """Returns needs_normalization=False when project has no source file."""
+        project = Mock()
+        project.source_file_path = None
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_ctx["db"].execute.return_value = mock_result
+
+        result = await check_normalization_status_task(mock_ctx, project_id)
+
+        assert result["needs_normalization"] is False
+
+
+# ---------------------------------------------------------------------------
+# run_remote_check_task
+# ---------------------------------------------------------------------------
+
+
+class TestRunRemoteCheckTask:
+    """Tests for the run_remote_check_task background function."""
+
+    @pytest.mark.asyncio
+    async def test_remote_check_no_sync_config(
+        self, mock_ctx: dict[str, Any], project_id: str
+    ) -> None:
+        """Returns failed when no remote sync config exists."""
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_ctx["db"].execute.return_value = mock_result
+
+        result = await run_remote_check_task(mock_ctx, project_id)
+
+        assert result["status"] == "failed"
+        assert "not configured" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_remote_check_success_with_changes(
+        self, mock_ctx: dict[str, Any], project_id: str
+    ) -> None:
+        """Returns has_changes=True when remote differs from local."""
+        mock_config = MagicMock()
+        mock_config.id = uuid.uuid4()
+        mock_config.repo_owner = "owner"
+        mock_config.repo_name = "repo"
+        mock_config.file_path = "ontology.ttl"
+        mock_config.branch = "main"
+        mock_config.status = "idle"
+
+        mock_project = MagicMock()
+        mock_project.source_file_path = "projects/123/ontology.ttl"
+
+        mock_integration = MagicMock()
+        mock_integration.connected_by_user_id = "user-1"
+
+        mock_token_row = MagicMock()
+        mock_token_row.encrypted_token = "encrypted"
+
+        # Sequence of execute calls
+        mock_config_result = Mock()
+        mock_config_result.scalar_one_or_none.return_value = mock_config
+        mock_project_result = Mock()
+        mock_project_result.scalar_one_or_none.return_value = mock_project
+        mock_integration_result = Mock()
+        mock_integration_result.scalar_one_or_none.return_value = mock_integration
+        mock_token_result = Mock()
+        mock_token_result.scalar_one_or_none.return_value = mock_token_row
+
+        mock_ctx["db"].execute.side_effect = [
+            mock_config_result,
+            mock_project_result,
+            mock_integration_result,
+            mock_token_result,
+        ]
+
+        with (
+            patch("ontokit.worker.decrypt_token", return_value="decrypted-pat"),
+            patch("ontokit.worker.get_storage_service") as mock_storage_fn,
+            patch("ontokit.services.github_service.get_github_service") as mock_gh_fn,
+        ):
+            mock_storage = MagicMock()
+            mock_storage.bucket = "projects"
+            mock_storage.download_file = AsyncMock(return_value=b"old content")
+            mock_storage_fn.return_value = mock_storage
+
+            mock_gh_svc = MagicMock()
+            mock_gh_svc.get_file_content = AsyncMock(return_value=b"new content")
+            mock_gh_fn.return_value = mock_gh_svc
+
+            result = await run_remote_check_task(mock_ctx, project_id)
+
+        assert result["status"] == "completed"
+        assert result["has_changes"] is True
+
+
+# ---------------------------------------------------------------------------
+# run_embedding_generation_task
+# ---------------------------------------------------------------------------
+
+
+class TestRunEmbeddingGenerationTask:
+    """Tests for the run_embedding_generation_task background function."""
+
+    @pytest.mark.asyncio
+    async def test_embedding_generation_success(
+        self, mock_ctx: dict[str, Any], project_id: str
+    ) -> None:
+        """Successful embedding generation returns status=completed."""
+        job_id = str(uuid.uuid4())
+
+        with patch("ontokit.services.embedding_service.EmbeddingService") as mock_cls:
+            mock_svc = mock_cls.return_value
+            mock_svc.embed_project = AsyncMock()
+
+            result = await run_embedding_generation_task(mock_ctx, project_id, "main", job_id)
+
+        assert result["status"] == "completed"
+        assert result["project_id"] == project_id
+        assert result["branch"] == "main"
+        assert result["job_id"] == job_id
+
+    @pytest.mark.asyncio
+    async def test_embedding_generation_failure(
+        self, mock_ctx: dict[str, Any], project_id: str
+    ) -> None:
+        """Embedding generation failure re-raises the exception."""
+        job_id = str(uuid.uuid4())
+
+        with patch("ontokit.services.embedding_service.EmbeddingService") as mock_cls:
+            mock_svc = mock_cls.return_value
+            mock_svc.embed_project = AsyncMock(side_effect=RuntimeError("embed failed"))
+
+            with pytest.raises(RuntimeError, match="embed failed"):
+                await run_embedding_generation_task(mock_ctx, project_id, "main", job_id)
+
+
+# ---------------------------------------------------------------------------
+# sync_github_projects
+# ---------------------------------------------------------------------------
+
+
+class TestSyncGithubProjects:
+    """Tests for the sync_github_projects cron function."""
+
+    @pytest.mark.asyncio
+    async def test_sync_no_integrations(self, mock_ctx: dict[str, Any]) -> None:
+        """Returns zeroes when no integrations exist."""
+        mock_result = Mock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_ctx["db"].execute.return_value = mock_result
+
+        with patch("ontokit.worker.BareGitRepositoryService"):
+            result = await sync_github_projects(mock_ctx)
+
+        assert result["total"] == 0
+        assert result["synced"] == 0
+        assert result["errors"] == 0
+
+    @pytest.mark.asyncio
+    async def test_sync_skips_integration_without_connected_user(
+        self, mock_ctx: dict[str, Any]
+    ) -> None:
+        """Skips integrations that have no connected_by_user_id."""
+        integration = MagicMock()
+        integration.project_id = uuid.uuid4()
+        integration.connected_by_user_id = None
+
+        mock_result = Mock()
+        mock_result.scalars.return_value.all.return_value = [integration]
+        mock_ctx["db"].execute.return_value = mock_result
+
+        with patch("ontokit.worker.BareGitRepositoryService"):
+            result = await sync_github_projects(mock_ctx)
+
+        assert result["total"] == 1
+        assert result["synced"] == 0
+        assert result["errors"] == 0

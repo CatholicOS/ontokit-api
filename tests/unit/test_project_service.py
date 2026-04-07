@@ -597,3 +597,343 @@ class TestToResponse:
         response = service._to_response(project, user)
 
         assert response.label_preferences == ["rdfs:label@en", "skos:prefLabel"]
+
+
+# ---------------------------------------------------------------------------
+# list_accessible
+# ---------------------------------------------------------------------------
+
+
+class TestListAccessible:
+    @pytest.mark.asyncio
+    async def test_list_public_filter(self, service: ProjectService, mock_db: AsyncMock) -> None:
+        """filter_type='public' returns only public projects."""
+        project = _make_project(is_public=True)
+
+        mock_db.scalar = AsyncMock(side_effect=[1, 1])  # unfiltered_total, total
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [project]
+        mock_db.execute.return_value = mock_result
+
+        user = _make_user()
+        result = await service.list_accessible(user, skip=0, limit=20, filter_type="public")
+
+        assert result.total >= 0
+        assert result.skip == 0
+        assert result.limit == 20
+
+    @pytest.mark.asyncio
+    async def test_list_private_filter(self, service: ProjectService, mock_db: AsyncMock) -> None:
+        """filter_type='private' returns only private projects user is member of."""
+        project = _make_project(is_public=False)
+
+        mock_db.scalar = AsyncMock(side_effect=[1, 1])
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [project]
+        mock_db.execute.return_value = mock_result
+
+        user = _make_user()
+        result = await service.list_accessible(user, skip=0, limit=20, filter_type="private")
+
+        assert result.skip == 0
+
+    @pytest.mark.asyncio
+    async def test_list_mine_filter(self, service: ProjectService, mock_db: AsyncMock) -> None:
+        """filter_type='mine' returns projects user is a member of."""
+        project = _make_project()
+
+        mock_db.scalar = AsyncMock(side_effect=[1, 1])
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [project]
+        mock_db.execute.return_value = mock_result
+
+        user = _make_user()
+        result = await service.list_accessible(user, skip=0, limit=20, filter_type="mine")
+
+        assert result.skip == 0
+
+    @pytest.mark.asyncio
+    async def test_list_no_filter(self, service: ProjectService, mock_db: AsyncMock) -> None:
+        """filter_type=None returns all accessible projects."""
+        project = _make_project(is_public=True)
+
+        mock_db.scalar = AsyncMock(side_effect=[1, 1])
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [project]
+        mock_db.execute.return_value = mock_result
+
+        user = _make_user()
+        result = await service.list_accessible(user, skip=0, limit=20, filter_type=None)
+
+        assert len(result.items) == 1
+        assert result.items[0].name == "Test Ontology"
+
+    @pytest.mark.asyncio
+    async def test_list_anonymous_user(self, service: ProjectService, mock_db: AsyncMock) -> None:
+        """Anonymous user sees only public projects."""
+        project = _make_project(is_public=True)
+
+        mock_db.scalar = AsyncMock(side_effect=[1, 1])
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [project]
+        mock_db.execute.return_value = mock_result
+
+        result = await service.list_accessible(None, skip=0, limit=20)
+
+        assert len(result.items) == 1
+
+    @pytest.mark.asyncio
+    async def test_list_anonymous_mine_filter_empty(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Anonymous user with filter_type='mine' gets empty results."""
+        mock_db.scalar = AsyncMock(side_effect=[0, 0])
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_db.execute.return_value = mock_result
+
+        result = await service.list_accessible(None, skip=0, limit=20, filter_type="mine")
+
+        assert result.total == 0
+        assert result.items == []
+
+    @pytest.mark.asyncio
+    async def test_list_anonymous_private_filter_empty(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Anonymous user with filter_type='private' gets empty results."""
+        mock_db.scalar = AsyncMock(side_effect=[0, 0])
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_db.execute.return_value = mock_result
+
+        result = await service.list_accessible(None, skip=0, limit=20, filter_type="private")
+
+        assert result.total == 0
+        assert result.items == []
+
+    @pytest.mark.asyncio
+    async def test_list_with_search(self, service: ProjectService, mock_db: AsyncMock) -> None:
+        """search param filters projects by name/description."""
+        project = _make_project()
+        project.name = "Ontology of Animals"
+
+        mock_db.scalar = AsyncMock(side_effect=[1, 1])
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [project]
+        mock_db.execute.return_value = mock_result
+
+        user = _make_user()
+        result = await service.list_accessible(user, skip=0, limit=20, search="Animals")
+
+        assert len(result.items) == 1
+
+    @pytest.mark.asyncio
+    async def test_list_pagination(self, service: ProjectService, mock_db: AsyncMock) -> None:
+        """Pagination parameters are forwarded correctly in the response."""
+        mock_db.scalar = AsyncMock(side_effect=[5, 5])
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_db.execute.return_value = mock_result
+
+        user = _make_user()
+        result = await service.list_accessible(user, skip=2, limit=3)
+
+        assert result.skip == 2
+        assert result.limit == 3
+
+
+# ---------------------------------------------------------------------------
+# update_member
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateMember:
+    @pytest.mark.asyncio
+    async def test_update_member_success(self, service: ProjectService, mock_db: AsyncMock) -> None:
+        """Owner can update a member's role."""
+        members = [_make_member(OWNER_ID, "owner"), _make_member(EDITOR_ID, "editor")]
+        project = _make_project(members=members)
+
+        mock_result_project = MagicMock()
+        mock_result_project.scalar_one_or_none.return_value = project
+
+        editor_member = _make_member(EDITOR_ID, "editor")
+        mock_result_member = MagicMock()
+        mock_result_member.scalar_one_or_none.return_value = editor_member
+
+        mock_db.execute.side_effect = [mock_result_project, mock_result_member]
+
+        owner = _make_user(user_id=OWNER_ID)
+
+        with patch("ontokit.services.user_service.get_user_service") as mock_us:
+            mock_user_service = MagicMock()
+            mock_user_service.get_user_info = AsyncMock(
+                return_value={"id": EDITOR_ID, "name": "Editor", "email": "editor@test.com"}
+            )
+            mock_us.return_value = mock_user_service
+
+            from ontokit.schemas.project import MemberUpdate
+
+            await service.update_member(PROJECT_ID, EDITOR_ID, MemberUpdate(role="admin"), owner)
+
+        assert editor_member.role == "admin"
+        mock_db.commit.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_update_member_cannot_change_owner_role(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Cannot change the role of the project owner."""
+        members = [_make_member(OWNER_ID, "owner"), _make_member(ADMIN_ID, "admin")]
+        project = _make_project(members=members)
+
+        mock_result_project = MagicMock()
+        mock_result_project.scalar_one_or_none.return_value = project
+
+        owner_member = _make_member(OWNER_ID, "owner")
+        mock_result_member = MagicMock()
+        mock_result_member.scalar_one_or_none.return_value = owner_member
+
+        mock_db.execute.side_effect = [mock_result_project, mock_result_member]
+
+        admin = _make_user(user_id=ADMIN_ID)
+        from ontokit.schemas.project import MemberUpdate
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.update_member(PROJECT_ID, OWNER_ID, MemberUpdate(role="admin"), admin)
+        assert exc_info.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_update_member_cannot_set_owner_role(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Cannot set a member's role to 'owner' via update_member."""
+        members = [_make_member(OWNER_ID, "owner"), _make_member(EDITOR_ID, "editor")]
+        project = _make_project(members=members)
+
+        mock_result_project = MagicMock()
+        mock_result_project.scalar_one_or_none.return_value = project
+
+        editor_member = _make_member(EDITOR_ID, "editor")
+        mock_result_member = MagicMock()
+        mock_result_member.scalar_one_or_none.return_value = editor_member
+
+        mock_db.execute.side_effect = [mock_result_project, mock_result_member]
+
+        owner = _make_user(user_id=OWNER_ID)
+        from ontokit.schemas.project import MemberUpdate
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.update_member(PROJECT_ID, EDITOR_ID, MemberUpdate(role="owner"), owner)
+        assert exc_info.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_update_member_not_found(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Updating a non-existent member returns 404."""
+        project = _make_project()
+        mock_result_project = MagicMock()
+        mock_result_project.scalar_one_or_none.return_value = project
+
+        mock_result_member = MagicMock()
+        mock_result_member.scalar_one_or_none.return_value = None
+
+        mock_db.execute.side_effect = [mock_result_project, mock_result_member]
+
+        owner = _make_user(user_id=OWNER_ID)
+        from ontokit.schemas.project import MemberUpdate
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.update_member(
+                PROJECT_ID, "ghost-user", MemberUpdate(role="editor"), owner
+            )
+        assert exc_info.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# list_members
+# ---------------------------------------------------------------------------
+
+
+class TestListMembers:
+    @pytest.mark.asyncio
+    async def test_list_members_success(self, service: ProjectService, mock_db: AsyncMock) -> None:
+        """List members returns all members sorted by role."""
+        members = [
+            _make_member(OWNER_ID, "owner"),
+            _make_member(EDITOR_ID, "editor"),
+        ]
+        project = _make_project(members=members)
+
+        mock_result_project = MagicMock()
+        mock_result_project.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = mock_result_project
+
+        user = _make_user(user_id=OWNER_ID)
+        result = await service.list_members(PROJECT_ID, user)
+
+        assert result.total == 2
+        # Owner should come first in sorted order
+        assert result.items[0].role == "owner"
+        assert result.items[1].role == "editor"
+
+
+# ---------------------------------------------------------------------------
+# set_branch_preference / get_branch_preference
+# ---------------------------------------------------------------------------
+
+
+class TestBranchPreference:
+    @pytest.mark.asyncio
+    async def test_set_branch_preference_success(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Setting branch preference updates the member row."""
+        member = _make_member(OWNER_ID, "owner")
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = member
+        mock_db.execute.return_value = mock_result
+
+        await service.set_branch_preference(PROJECT_ID, OWNER_ID, "develop")
+
+        assert member.preferred_branch == "develop"
+        mock_db.commit.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_set_branch_preference_no_member(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Setting branch preference for a non-member is a no-op."""
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute.return_value = mock_result
+
+        await service.set_branch_preference(PROJECT_ID, "ghost-user", "develop")
+
+        mock_db.commit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_get_branch_preference_success(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Getting branch preference returns the stored branch."""
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = "develop"
+        mock_db.execute.return_value = mock_result
+
+        result = await service.get_branch_preference(PROJECT_ID, OWNER_ID)
+        assert result == "develop"
+
+    @pytest.mark.asyncio
+    async def test_get_branch_preference_none(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Getting branch preference for a non-member returns None."""
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute.return_value = mock_result
+
+        result = await service.get_branch_preference(PROJECT_ID, "ghost-user")
+        assert result is None

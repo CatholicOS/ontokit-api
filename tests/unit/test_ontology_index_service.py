@@ -270,3 +270,207 @@ class TestDeleteBranchIndex:
         """With auto_commit=False, does not commit."""
         await service.delete_branch_index(PROJECT_ID, BRANCH, auto_commit=False)
         mock_db.commit.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# _index_graph
+# ---------------------------------------------------------------------------
+
+
+class TestIndexGraph:
+    @pytest.mark.asyncio
+    async def test_index_graph_extracts_entities(
+        self,
+        service: OntologyIndexService,
+        mock_db: AsyncMock,  # noqa: ARG002
+        sample_graph: Graph,
+    ) -> None:
+        """_index_graph extracts classes and properties from the sample graph."""
+        # sample_graph has: Person, Organization (owl:Class),
+        # worksFor (ObjectProperty), hasName (DatatypeProperty) = 4 entities
+        count = await service._index_graph(PROJECT_ID, BRANCH, sample_graph)
+        assert count == 4
+
+    @pytest.mark.asyncio
+    async def test_index_graph_empty_graph(
+        self,
+        service: OntologyIndexService,
+        mock_db: AsyncMock,  # noqa: ARG002
+    ) -> None:
+        """_index_graph returns 0 for an empty graph."""
+        empty_graph = Graph()
+        count = await service._index_graph(PROJECT_ID, BRANCH, empty_graph)
+        assert count == 0
+
+    @pytest.mark.asyncio
+    async def test_index_graph_skips_owl_thing(
+        self,
+        service: OntologyIndexService,
+        mock_db: AsyncMock,  # noqa: ARG002
+    ) -> None:
+        """_index_graph does not count owl:Thing as an entity."""
+        from rdflib import URIRef
+        from rdflib.namespace import OWL, RDF
+
+        g = Graph()
+        g.add((OWL.Thing, RDF.type, OWL.Class))
+        g.add((URIRef("http://example.org/A"), RDF.type, OWL.Class))
+
+        count = await service._index_graph(PROJECT_ID, BRANCH, g)
+        assert count == 1
+
+
+# ---------------------------------------------------------------------------
+# search_entities
+# ---------------------------------------------------------------------------
+
+
+class TestSearchEntities:
+    @pytest.mark.asyncio
+    async def test_search_entities_returns_results(
+        self, service: OntologyIndexService, mock_db: AsyncMock
+    ) -> None:
+        """search_entities returns matching entities."""
+        # Mock count query
+        mock_count_result = MagicMock()
+        mock_count_result.scalar.return_value = 1
+
+        # Mock entity row
+        mock_entity_row = MagicMock()
+        mock_entity_row.id = "entity-id-1"
+        mock_entity_row.iri = "http://example.org/Person"
+        mock_entity_row.local_name = "Person"
+        mock_entity_row.entity_type = "class"
+        mock_entity_row.deprecated = False
+
+        mock_entities_result = MagicMock()
+        mock_entities_result.all.return_value = [mock_entity_row]
+
+        # Mock labels result (empty)
+        mock_labels_result = MagicMock()
+        mock_labels_result.scalars.return_value.all.return_value = []
+
+        mock_db.execute.side_effect = [
+            mock_count_result,  # count query
+            mock_entities_result,  # entity query
+            mock_labels_result,  # labels query
+        ]
+
+        result = await service.search_entities(PROJECT_ID, BRANCH, "Person")
+        assert result["total"] == 1
+        assert len(result["results"]) == 1
+        assert result["results"][0]["iri"] == "http://example.org/Person"
+
+    @pytest.mark.asyncio
+    async def test_search_entities_no_matches(
+        self, service: OntologyIndexService, mock_db: AsyncMock
+    ) -> None:
+        """search_entities returns empty results when nothing matches."""
+        mock_count_result = MagicMock()
+        mock_count_result.scalar.return_value = 0
+
+        mock_entities_result = MagicMock()
+        mock_entities_result.all.return_value = []
+
+        mock_db.execute.side_effect = [
+            mock_count_result,
+            mock_entities_result,
+        ]
+
+        result = await service.search_entities(PROJECT_ID, BRANCH, "Nonexistent")
+        assert result["total"] == 0
+        assert result["results"] == []
+
+
+# ---------------------------------------------------------------------------
+# get_class_count
+# ---------------------------------------------------------------------------
+
+
+class TestGetClassCount:
+    @pytest.mark.asyncio
+    async def test_get_class_count_returns_count(
+        self, service: OntologyIndexService, mock_db: AsyncMock
+    ) -> None:
+        """get_class_count returns the number of indexed classes."""
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = 42
+        mock_db.execute.return_value = mock_result
+
+        count = await service.get_class_count(PROJECT_ID, BRANCH)
+        assert count == 42
+
+    @pytest.mark.asyncio
+    async def test_get_class_count_returns_zero_when_none(
+        self, service: OntologyIndexService, mock_db: AsyncMock
+    ) -> None:
+        """get_class_count returns 0 when scalar returns None."""
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = None
+        mock_db.execute.return_value = mock_result
+
+        count = await service.get_class_count(PROJECT_ID, BRANCH)
+        assert count == 0
+
+
+# ---------------------------------------------------------------------------
+# get_class_detail (as proxy for get_entity found/not found)
+# ---------------------------------------------------------------------------
+
+
+class TestGetClassDetail:
+    @pytest.mark.asyncio
+    async def test_get_class_detail_not_found(
+        self, service: OntologyIndexService, mock_db: AsyncMock
+    ) -> None:
+        """get_class_detail returns None when entity not found."""
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute.return_value = mock_result
+
+        result = await service.get_class_detail(PROJECT_ID, BRANCH, "http://example.org/Missing")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_class_detail_found(
+        self, service: OntologyIndexService, mock_db: AsyncMock
+    ) -> None:
+        """get_class_detail returns full entity info when found."""
+        import uuid as _uuid
+
+        entity = MagicMock()
+        entity.id = _uuid.uuid4()
+        entity.iri = "http://example.org/Person"
+        entity.local_name = "Person"
+        entity.entity_type = "class"
+        entity.deprecated = False
+
+        # First execute: entity lookup
+        mock_entity_result = MagicMock()
+        mock_entity_result.scalar_one_or_none.return_value = entity
+
+        # labels, comments, parents, child_count, annotations
+        mock_labels = MagicMock()
+        mock_labels.scalars.return_value.all.return_value = []
+        mock_comments = MagicMock()
+        mock_comments.scalars.return_value.all.return_value = []
+        mock_parents = MagicMock()
+        mock_parents.all.return_value = []
+        mock_child_count = MagicMock()
+        mock_child_count.scalar.return_value = 0
+        mock_annotations = MagicMock()
+        mock_annotations.scalars.return_value.all.return_value = []
+
+        mock_db.execute.side_effect = [
+            mock_entity_result,
+            mock_labels,
+            mock_comments,
+            mock_parents,
+            mock_child_count,
+            mock_annotations,
+        ]
+
+        result = await service.get_class_detail(PROJECT_ID, BRANCH, "http://example.org/Person")
+        assert result is not None
+        assert result["iri"] == "http://example.org/Person"
+        assert result["child_count"] == 0
