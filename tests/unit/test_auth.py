@@ -1,6 +1,6 @@
 """Tests for the authentication and authorization module."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -87,7 +87,7 @@ class TestCurrentUser:
     """Tests for the CurrentUser Pydantic model."""
 
     @patch("ontokit.core.auth.settings")
-    def test_current_user_is_superadmin(self, mock_settings) -> None:  # noqa: ANN001
+    def test_current_user_is_superadmin(self, mock_settings: MagicMock) -> None:
         """User whose id is in superadmin_ids is detected as superadmin."""
         mock_settings.superadmin_ids = {"super-user-id", "other-admin"}
         user = CurrentUser(
@@ -99,7 +99,7 @@ class TestCurrentUser:
         assert user.is_superadmin is True
 
     @patch("ontokit.core.auth.settings")
-    def test_current_user_not_superadmin(self, mock_settings) -> None:  # noqa: ANN001
+    def test_current_user_not_superadmin(self, mock_settings: MagicMock) -> None:
         """User whose id is NOT in superadmin_ids is not superadmin."""
         mock_settings.superadmin_ids = {"super-user-id"}
         user = CurrentUser(
