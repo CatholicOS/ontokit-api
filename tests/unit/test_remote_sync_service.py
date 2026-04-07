@@ -1,4 +1,3 @@
-# ruff: noqa: ARG002
 """Tests for RemoteSyncService (ontokit/services/remote_sync_service.py)."""
 
 from __future__ import annotations
@@ -8,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from ontokit.core.auth import CurrentUser
 from ontokit.schemas.remote_sync import RemoteSyncConfigCreate
@@ -87,7 +87,7 @@ class TestFactory:
 
 class TestVerifyAccess:
     @pytest.mark.asyncio
-    async def test_viewer_can_read(self, service: RemoteSyncService, mock_db: AsyncMock) -> None:
+    async def test_viewer_can_read(self, service: RemoteSyncService, mock_db: AsyncMock) -> None:  # noqa: ARG002
         """A viewer can access read-only endpoints (require_admin=False)."""
         with patch("ontokit.services.remote_sync_service.get_project_service") as mock_factory:
             mock_ps = MagicMock()
@@ -184,7 +184,7 @@ class TestSaveConfig:
             # The service will call db.add, db.commit, db.refresh
             # then model_validate which will fail on a mock — that's OK,
             # we're testing the side-effects.
-            with pytest.raises(Exception):  # noqa: B017
+            with pytest.raises(ValidationError):
                 await service.save_config(PROJECT_ID, data, _make_user())
 
             assert mock_db.add.called
