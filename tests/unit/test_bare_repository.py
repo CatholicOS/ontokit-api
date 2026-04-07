@@ -98,14 +98,14 @@ class TestBranches:
 
     def test_list_branches_includes_new_branch(self, bare_git_repo: BareOntologyRepository) -> None:
         """list_branches returns all branches including newly created ones."""
-        bare_git_repo.create_branch("dev")
+        bare_git_repo.create_branch("dev", from_ref="main")
         names = {b.name for b in bare_git_repo.list_branches()}
         assert "main" in names
         assert "dev" in names
 
     def test_delete_branch(self, bare_git_repo: BareOntologyRepository) -> None:
         """delete_branch removes a merged branch."""
-        bare_git_repo.create_branch("to-delete")
+        bare_git_repo.create_branch("to-delete", from_ref="main")
         assert bare_git_repo.delete_branch("to-delete") is True
         names = {b.name for b in bare_git_repo.list_branches()}
         assert "to-delete" not in names
@@ -124,7 +124,7 @@ class TestBranches:
         self, bare_git_repo: BareOntologyRepository
     ) -> None:
         """Deleting an unmerged branch without force raises ValueError."""
-        bare_git_repo.create_branch("unmerged")
+        bare_git_repo.create_branch("unmerged", from_ref="main")
         bare_git_repo.write_file(
             branch_name="unmerged",
             filepath="extra.ttl",
@@ -136,7 +136,7 @@ class TestBranches:
 
     def test_delete_unmerged_branch_with_force(self, bare_git_repo: BareOntologyRepository) -> None:
         """Force-deleting an unmerged branch succeeds."""
-        bare_git_repo.create_branch("unmerged")
+        bare_git_repo.create_branch("unmerged", from_ref="main")
         bare_git_repo.write_file(
             branch_name="unmerged",
             filepath="extra.ttl",
@@ -201,7 +201,7 @@ class TestWriteToBranch:
 
     def test_write_to_feature_branch(self, bare_git_repo: BareOntologyRepository) -> None:
         """Writing to a feature branch does not affect main."""
-        bare_git_repo.create_branch("feature")
+        bare_git_repo.create_branch("feature", from_ref="main")
         bare_git_repo.write_file(
             branch_name="feature",
             filepath="feature_file.ttl",
@@ -231,7 +231,7 @@ class TestMerge:
 
     def test_fast_forward_merge(self, bare_git_repo: BareOntologyRepository) -> None:
         """Merging a branch with new commits into main succeeds."""
-        bare_git_repo.create_branch("ff-branch")
+        bare_git_repo.create_branch("ff-branch", from_ref="main")
         bare_git_repo.write_file(
             branch_name="ff-branch",
             filepath="ontology.ttl",
@@ -253,7 +253,7 @@ class TestMerge:
 
     def test_merge_already_up_to_date(self, bare_git_repo: BareOntologyRepository) -> None:
         """Merging a branch that is behind target returns already up to date."""
-        bare_git_repo.create_branch("old-branch")
+        bare_git_repo.create_branch("old-branch", from_ref="main")
         # main advances
         bare_git_repo.write_file(
             branch_name="main",

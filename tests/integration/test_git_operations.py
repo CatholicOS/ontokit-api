@@ -63,7 +63,7 @@ class TestBranchWorkflow:
 
     def test_create_branch_modify_and_list(self, bare_git_repo: BareOntologyRepository) -> None:
         """Create a branch, commit on it, and verify both branches exist."""
-        bare_git_repo.create_branch("feature-x")
+        bare_git_repo.create_branch("feature-x", from_ref="main")
 
         bare_git_repo.write_file(
             branch_name="feature-x",
@@ -84,7 +84,7 @@ class TestBranchWorkflow:
 
     def test_branch_has_correct_ahead_behind(self, bare_git_repo: BareOntologyRepository) -> None:
         """A branch with extra commits reports commits_ahead > 0."""
-        bare_git_repo.create_branch("ahead-branch")
+        bare_git_repo.create_branch("ahead-branch", from_ref="main")
         bare_git_repo.write_file(
             branch_name="ahead-branch",
             filepath="extra.ttl",
@@ -100,7 +100,7 @@ class TestMergeWorkflow:
 
     def test_branch_commit_merge(self, bare_git_repo: BareOntologyRepository) -> None:
         """Branch off main, commit changes, merge back, verify content on main."""
-        bare_git_repo.create_branch("merge-me")
+        bare_git_repo.create_branch("merge-me", from_ref="main")
 
         # Commit on branch
         bare_git_repo.write_file(
@@ -134,7 +134,7 @@ class TestMergeWorkflow:
 
     def test_merge_nonexistent_target_raises(self, bare_git_repo: BareOntologyRepository) -> None:
         """Merging into a non-existent branch raises ValueError."""
-        bare_git_repo.create_branch("exists")
+        bare_git_repo.create_branch("exists", from_ref="main")
         with pytest.raises(ValueError, match="Target branch not found"):
             bare_git_repo.merge_branch(source="exists", target="ghost")
 
