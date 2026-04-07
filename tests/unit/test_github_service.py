@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -45,8 +46,8 @@ def github_service() -> GitHubService:
 
 def _mock_response(
     status_code: int = 200,
-    json_data: dict | list | None = None,
-    headers: dict | None = None,
+    json_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+    headers: dict[str, str] | None = None,
     content: bytes = b"",
 ) -> MagicMock:
     """Create a mock httpx.Response."""
