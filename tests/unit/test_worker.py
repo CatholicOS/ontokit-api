@@ -1,0 +1,353 @@
+"""Tests for ARQ worker background task functions."""
+
+from __future__ import annotations
+
+import uuid
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
+
+from ontokit.worker import (
+    on_job_end,
+    on_job_start,
+    run_lint_task,
+    run_ontology_index_task,
+    shutdown,
+    startup,
+)
+
+
+@pytest.fixture
+def mock_ctx(mock_db_session: AsyncMock, mock_redis: AsyncMock) -> dict:
+    """Create a minimal ARQ context dict with mock db and redis."""
+    return {"db": mock_db_session, "redis": mock_redis}
+
+
+@pytest.fixture
+def project_id() -> str:
+    """A stable project UUID string for tests."""
+    return str(uuid.UUID("12345678-1234-5678-1234-567812345678"))
+
+
+# ---------------------------------------------------------------------------
+# run_ontology_index_task
+# ---------------------------------------------------------------------------
+
+
+class TestRunOntologyIndexTask:
+    """Tests for the run_ontology_index_task background function."""
+
+    @pytest.mark.asyncio
+    async def test_project_not_found_raises(self, mock_ctx: dict, project_id: str) -> None:
+        """Raises ValueError when the project does not exist in the DB."""
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_ctx["db"].execute.return_value = mock_result
+
+        with pytest.raises(ValueError, match="not found"):
+            await run_ontology_index_task(mock_ctx, project_id)
+
+    @pytest.mark.asyncio
+    async def test_project_no_source_file_raises(self, mock_ctx: dict, project_id: str) -> None:
+        """Raises ValueError when the project has no source_file_path."""
+        project = Mock()
+        project.source_file_path = None
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_ctx["db"].execute.return_value = mock_result
+
+        with pytest.raises(ValueError, match="has no ontology file"):
+            await run_ontology_index_task(mock_ctx, project_id)
+
+    @pytest.mark.asyncio
+    async def test_successful_index_returns_completed(
+        self, mock_ctx: dict, project_id: str
+    ) -> None:
+        """Successful indexing returns status=completed with entity_count."""
+        project = Mock()
+        project.source_file_path = "ontokit/test.ttl"
+        project.git_ontology_path = "test.ttl"
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_ctx["db"].execute.return_value = mock_result
+
+        mock_graph = Mock()
+        mock_repo = Mock()
+        mock_repo.get_branch_commit_hash.return_value = "abc123"
+
+        with (
+            patch("ontokit.worker.get_storage_service"),
+            patch("ontokit.worker.get_ontology_service") as mock_onto_svc,
+            patch("ontokit.worker.BareGitRepositoryService") as mock_git_cls,
+            patch("ontokit.services.ontology_index.OntologyIndexService") as mock_idx_cls,
+        ):
+            mock_git_svc = mock_git_cls.return_value
+            mock_git_svc.repository_exists.return_value = True
+            mock_git_svc.get_repository.return_value = mock_repo
+
+            onto_svc = mock_onto_svc.return_value
+            onto_svc.load_from_git = AsyncMock(return_value=mock_graph)
+
+            idx_svc = mock_idx_cls.return_value
+            idx_svc.full_reindex = AsyncMock(return_value=42)
+
+            result = await run_ontology_index_task(mock_ctx, project_id, "main")
+
+        assert result["status"] == "completed"
+        assert result["entity_count"] == 42
+        assert result["commit_hash"] == "abc123"
+
+    @pytest.mark.asyncio
+    async def test_index_publishes_start_and_complete(
+        self, mock_ctx: dict, project_id: str
+    ) -> None:
+        """Redis publish is called for both start and complete notifications."""
+        project = Mock()
+        project.source_file_path = "ontokit/test.ttl"
+        project.git_ontology_path = "test.ttl"
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_ctx["db"].execute.return_value = mock_result
+
+        with (
+            patch("ontokit.worker.get_storage_service"),
+            patch("ontokit.worker.get_ontology_service") as mock_onto_svc,
+            patch("ontokit.worker.BareGitRepositoryService") as mock_git_cls,
+            patch("ontokit.services.ontology_index.OntologyIndexService") as mock_idx_cls,
+        ):
+            mock_git_svc = mock_git_cls.return_value
+            mock_git_svc.repository_exists.return_value = True
+            mock_git_svc.get_repository.return_value = Mock(
+                get_branch_commit_hash=Mock(return_value="abc")
+            )
+            mock_onto_svc.return_value.load_from_git = AsyncMock(return_value=Mock())
+            mock_idx_cls.return_value.full_reindex = AsyncMock(return_value=5)
+
+            await run_ontology_index_task(mock_ctx, project_id)
+
+        # At least 2 publish calls: start + complete
+        assert mock_ctx["redis"].publish.await_count >= 2
+
+    @pytest.mark.asyncio
+    async def test_index_uses_storage_fallback(self, mock_ctx: dict, project_id: str) -> None:
+        """When git repo does not exist, falls back to storage loading."""
+        project = Mock()
+        project.source_file_path = "ontokit/test.ttl"
+        project.git_ontology_path = None
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_ctx["db"].execute.return_value = mock_result
+
+        with (
+            patch("ontokit.worker.get_storage_service"),
+            patch("ontokit.worker.get_ontology_service") as mock_onto_svc,
+            patch("ontokit.worker.BareGitRepositoryService") as mock_git_cls,
+            patch("ontokit.services.ontology_index.OntologyIndexService") as mock_idx_cls,
+        ):
+            mock_git_svc = mock_git_cls.return_value
+            mock_git_svc.repository_exists.return_value = False
+
+            onto_svc = mock_onto_svc.return_value
+            onto_svc.load_from_storage = AsyncMock(return_value=Mock())
+            mock_idx_cls.return_value.full_reindex = AsyncMock(return_value=10)
+
+            result = await run_ontology_index_task(mock_ctx, project_id)
+
+        assert result["commit_hash"] == "storage"
+        onto_svc.load_from_storage.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_index_failure_publishes_error(self, mock_ctx: dict, project_id: str) -> None:
+        """On failure, publishes an index_failed message and re-raises."""
+        project = Mock()
+        project.source_file_path = "ontokit/test.ttl"
+        project.git_ontology_path = "test.ttl"
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_ctx["db"].execute.return_value = mock_result
+
+        with (
+            patch("ontokit.worker.get_storage_service"),
+            patch("ontokit.worker.get_ontology_service") as mock_onto_svc,
+            patch("ontokit.worker.BareGitRepositoryService") as mock_git_cls,
+        ):
+            mock_git_svc = mock_git_cls.return_value
+            mock_git_svc.repository_exists.return_value = True
+            mock_onto_svc.return_value.load_from_git = AsyncMock(
+                side_effect=RuntimeError("parse error")
+            )
+
+            with pytest.raises(RuntimeError, match="parse error"):
+                await run_ontology_index_task(mock_ctx, project_id)
+
+        # Should have published start + failure
+        assert mock_ctx["redis"].publish.await_count >= 2
+
+
+# ---------------------------------------------------------------------------
+# run_lint_task
+# ---------------------------------------------------------------------------
+
+
+class TestRunLintTask:
+    """Tests for the run_lint_task background function."""
+
+    @pytest.mark.asyncio
+    async def test_lint_project_not_found_raises(self, mock_ctx: dict, project_id: str) -> None:
+        """Raises ValueError when the project does not exist."""
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_ctx["db"].execute.return_value = mock_result
+
+        with pytest.raises(ValueError, match="not found"):
+            await run_lint_task(mock_ctx, project_id)
+
+    @pytest.mark.asyncio
+    async def test_lint_no_source_file_raises(self, mock_ctx: dict, project_id: str) -> None:
+        """Raises ValueError when the project has no source_file_path."""
+        project = Mock()
+        project.source_file_path = None
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_ctx["db"].execute.return_value = mock_result
+
+        with pytest.raises(ValueError, match="has no ontology file"):
+            await run_lint_task(mock_ctx, project_id)
+
+    @pytest.mark.asyncio
+    async def test_lint_success_returns_completed(self, mock_ctx: dict, project_id: str) -> None:
+        """Successful lint returns status=completed with issues count."""
+        project = Mock()
+        project.source_file_path = "ontokit/test.ttl"
+
+        # First call returns project, subsequent calls are for the LintRun
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_ctx["db"].execute.return_value = mock_result
+
+        mock_run = MagicMock()
+        mock_run.id = uuid.uuid4()
+        mock_run.status = None
+        mock_run.completed_at = None
+        mock_run.issues_found = None
+
+        mock_lint_result = Mock()
+        mock_lint_result.issue_type = "warning"
+        mock_lint_result.rule_id = "R001"
+        mock_lint_result.message = "test issue"
+        mock_lint_result.subject_iri = "http://example.org/A"
+        mock_lint_result.details = None
+
+        with (
+            patch("ontokit.worker.get_storage_service"),
+            patch("ontokit.worker.get_ontology_service") as mock_onto_svc,
+            patch("ontokit.worker.get_linter") as mock_get_linter,
+            patch("ontokit.worker.LintRun", return_value=mock_run),
+            patch("ontokit.worker.LintIssue"),
+        ):
+            onto_svc = mock_onto_svc.return_value
+            onto_svc.load_from_storage = AsyncMock(return_value=Mock())
+            linter = mock_get_linter.return_value
+            linter.lint = AsyncMock(return_value=[mock_lint_result])
+
+            result = await run_lint_task(mock_ctx, project_id)
+
+        assert result["status"] == "completed"
+        assert result["issues_found"] == 1
+
+    @pytest.mark.asyncio
+    async def test_lint_publishes_notifications(self, mock_ctx: dict, project_id: str) -> None:
+        """Lint task publishes start and complete events to Redis."""
+        project = Mock()
+        project.source_file_path = "ontokit/test.ttl"
+        mock_result = Mock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_ctx["db"].execute.return_value = mock_result
+
+        mock_run = MagicMock()
+        mock_run.id = uuid.uuid4()
+
+        with (
+            patch("ontokit.worker.get_storage_service"),
+            patch("ontokit.worker.get_ontology_service") as mock_onto_svc,
+            patch("ontokit.worker.get_linter") as mock_get_linter,
+            patch("ontokit.worker.LintRun", return_value=mock_run),
+        ):
+            mock_onto_svc.return_value.load_from_storage = AsyncMock(return_value=Mock())
+            mock_get_linter.return_value.lint = AsyncMock(return_value=[])
+
+            await run_lint_task(mock_ctx, project_id)
+
+        assert mock_ctx["redis"].publish.await_count >= 2
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle hooks
+# ---------------------------------------------------------------------------
+
+
+class TestStartupShutdown:
+    """Tests for worker startup and shutdown hooks."""
+
+    @pytest.mark.asyncio
+    async def test_startup_creates_engine_and_factory(self) -> None:
+        """startup populates ctx with engine and session_factory."""
+        ctx: dict = {}
+        with patch("ontokit.worker.create_async_engine") as mock_engine_fn:
+            mock_engine = Mock()
+            mock_engine_fn.return_value = mock_engine
+
+            with patch("ontokit.worker.async_sessionmaker") as mock_factory_fn:
+                mock_factory = Mock()
+                mock_factory_fn.return_value = mock_factory
+
+                await startup(ctx)
+
+        assert ctx["engine"] is mock_engine
+        assert ctx["session_factory"] is mock_factory
+
+    @pytest.mark.asyncio
+    async def test_shutdown_disposes_engine(self) -> None:
+        """shutdown calls engine.dispose()."""
+        mock_engine = AsyncMock()
+        ctx = {"engine": mock_engine}
+        await shutdown(ctx)
+        mock_engine.dispose.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_without_engine(self) -> None:
+        """shutdown is a no-op when engine is missing from ctx."""
+        ctx: dict = {}
+        await shutdown(ctx)  # should not raise
+
+
+class TestJobLifecycle:
+    """Tests for on_job_start and on_job_end hooks."""
+
+    @pytest.mark.asyncio
+    async def test_on_job_start_creates_session(self) -> None:
+        """on_job_start creates a db session from the factory."""
+        mock_session = Mock()
+        mock_factory = Mock(return_value=mock_session)
+        ctx = {"session_factory": mock_factory}
+
+        await on_job_start(ctx)
+
+        assert ctx["db"] is mock_session
+        mock_factory.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_on_job_end_closes_session(self) -> None:
+        """on_job_end closes the db session."""
+        mock_session = AsyncMock()
+        ctx = {"db": mock_session}
+
+        await on_job_end(ctx)
+
+        mock_session.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_on_job_end_without_session(self) -> None:
+        """on_job_end is a no-op when db is missing from ctx."""
+        ctx: dict = {}
+        await on_job_end(ctx)  # should not raise

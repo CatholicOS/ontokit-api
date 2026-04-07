@@ -2,12 +2,10 @@
 
 from uuid import uuid4
 
-import pytest
-from rdflib import Graph, Literal, Namespace, URIRef
+from rdflib import Graph, Literal, Namespace
 from rdflib.namespace import OWL, RDF, RDFS
 
-from ontokit.services.linter import LINT_RULES, LintResult, OntologyLinter
-
+from ontokit.services.linter import LintResult, OntologyLinter
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -278,9 +276,7 @@ async def test_lint_all_rules() -> None:
         "duplicate-label",
         "undefined-parent",
     ):
-        assert _results_with_rule(issues, rule_id) == [], (
-            f"Unexpected issue for rule '{rule_id}'"
-        )
+        assert _results_with_rule(issues, rule_id) == [], f"Unexpected issue for rule '{rule_id}'"
 
     # Orphan should also be clear because Dog->Animal hierarchy exists
     assert _results_with_rule(issues, "orphan-class") == []

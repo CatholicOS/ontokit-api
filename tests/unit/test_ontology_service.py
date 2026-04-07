@@ -5,7 +5,6 @@ from rdflib import Graph, Literal, Namespace, URIRef
 from rdflib.namespace import OWL, RDF, RDFS, SKOS
 
 from ontokit.services.ontology import (
-    DEFAULT_LABEL_PREFERENCES,
     LABEL_PROPERTY_MAP,
     LabelPreference,
     select_preferred_label,
@@ -128,23 +127,17 @@ class TestSelectPreferredLabel:
 
     def test_select_preferred_label_english(self, graph_with_labels: Graph) -> None:
         """Selects English label when preferences request 'rdfs:label@en'."""
-        result = select_preferred_label(
-            graph_with_labels, EX.Person, preferences=["rdfs:label@en"]
-        )
+        result = select_preferred_label(graph_with_labels, EX.Person, preferences=["rdfs:label@en"])
         assert result == "Person"
 
     def test_select_preferred_label_italian(self, graph_with_labels: Graph) -> None:
         """Selects Italian label when preferences request 'rdfs:label@it'."""
-        result = select_preferred_label(
-            graph_with_labels, EX.Person, preferences=["rdfs:label@it"]
-        )
+        result = select_preferred_label(graph_with_labels, EX.Person, preferences=["rdfs:label@it"])
         assert result == "Persona"
 
     def test_select_preferred_label_fallback(self, graph_with_labels: Graph) -> None:
         """Falls back to rdfs:label when preferred language is not available."""
-        result = select_preferred_label(
-            graph_with_labels, EX.Person, preferences=["rdfs:label@de"]
-        )
+        result = select_preferred_label(graph_with_labels, EX.Person, preferences=["rdfs:label@de"])
         # No German label, but fallback logic returns any rdfs:label
         assert result in ("Person", "Persona")
 
@@ -153,9 +146,7 @@ class TestSelectPreferredLabel:
         result = select_preferred_label(graph_no_labels, EX.Thing)
         assert result is None
 
-    def test_select_preferred_label_default_preferences(
-        self, graph_with_labels: Graph
-    ) -> None:
+    def test_select_preferred_label_default_preferences(self, graph_with_labels: Graph) -> None:
         """Using default preferences (None) selects English rdfs:label first."""
         result = select_preferred_label(graph_with_labels, EX.Person, preferences=None)
         assert result == "Person"
@@ -167,37 +158,25 @@ class TestSelectPreferredLabel:
         )
         assert result == "Animal"
 
-    def test_select_preferred_label_skos_german(
-        self, graph_with_skos_labels: Graph
-    ) -> None:
+    def test_select_preferred_label_skos_german(self, graph_with_skos_labels: Graph) -> None:
         """Selects German SKOS prefLabel when preferences request 'skos:prefLabel@de'."""
         result = select_preferred_label(
             graph_with_skos_labels, EX.Animal, preferences=["skos:prefLabel@de"]
         )
         assert result == "Tier"
 
-    def test_select_preferred_label_any_language(
-        self, graph_with_labels: Graph
-    ) -> None:
+    def test_select_preferred_label_any_language(self, graph_with_labels: Graph) -> None:
         """Preference without language tag matches any available label."""
-        result = select_preferred_label(
-            graph_with_labels, EX.Person, preferences=["rdfs:label"]
-        )
+        result = select_preferred_label(graph_with_labels, EX.Person, preferences=["rdfs:label"])
         # Should return one of the available labels (either language)
         assert result in ("Person", "Persona")
 
-    def test_select_preferred_label_untagged_literal(
-        self, graph_untagged_label: Graph
-    ) -> None:
+    def test_select_preferred_label_untagged_literal(self, graph_untagged_label: Graph) -> None:
         """Label without a language tag is matched by a no-lang preference."""
-        result = select_preferred_label(
-            graph_untagged_label, EX.Widget, preferences=["rdfs:label"]
-        )
+        result = select_preferred_label(graph_untagged_label, EX.Widget, preferences=["rdfs:label"])
         assert result == "Widget"
 
-    def test_select_preferred_label_nonexistent_subject(
-        self, graph_with_labels: Graph
-    ) -> None:
+    def test_select_preferred_label_nonexistent_subject(self, graph_with_labels: Graph) -> None:
         """Returns None for a subject that does not exist in the graph."""
         result = select_preferred_label(graph_with_labels, EX.NonExistent)
         assert result is None

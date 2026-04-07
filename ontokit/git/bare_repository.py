@@ -379,7 +379,9 @@ class BareOntologyRepository:
                     target = self.repo.head.target
 
                 commit_iter = []
-                for count, commit in enumerate(self.repo.walk(target, pygit2.GIT_SORT_TIME)):  # type: ignore[arg-type]
+                for count, commit in enumerate(
+                    self.repo.walk(target, pygit2.GIT_SORT_TIME | pygit2.GIT_SORT_TOPOLOGICAL)
+                ):  # type: ignore[arg-type]
                     commit_iter.append(commit)
                     if count + 1 >= limit:
                         break

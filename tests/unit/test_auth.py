@@ -6,15 +6,14 @@ import pytest
 from fastapi import HTTPException
 
 from ontokit.core.auth import (
+    _JWKS_CACHE_TTL,
     ZITADEL_ROLES_CLAIM,
     CurrentUser,
     PermissionChecker,
     TokenPayload,
-    _JWKS_CACHE_TTL,
     _extract_roles,
     clear_jwks_cache,
 )
-
 
 # ---------------------------------------------------------------------------
 # _extract_roles
