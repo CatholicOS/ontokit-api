@@ -137,6 +137,7 @@ async def test_circular_hierarchy() -> None:
     assert len(matches) >= 1
     assert matches[0].issue_type == "error"
     # The cycle should mention both classes
+    assert matches[0].details is not None
     cycle_iris = matches[0].details["cycle_iris"]
     assert str(EX.A) in cycle_iris
     assert str(EX.B) in cycle_iris
@@ -220,6 +221,7 @@ async def test_undefined_parent() -> None:
     assert len(matches) == 1
     assert matches[0].issue_type == "error"
     assert matches[0].subject_iri == str(EX.Child)
+    assert matches[0].details is not None
     assert matches[0].details["undefined_parent"] == str(EX.Phantom)
 
 
