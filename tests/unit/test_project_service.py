@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
+from fastapi import HTTPException
 
 from ontokit.core.auth import CurrentUser
 from ontokit.schemas.project import MemberCreate, ProjectCreate, ProjectUpdate, TransferOwnership
@@ -144,7 +145,7 @@ class TestCreate:
 
         result = await service.create(data, owner)
 
-        assert mock_db.add.called
+        assert mock_db.add.call_count == 2  # project + owner member
         mock_db.flush.assert_awaited()
         mock_db.commit.assert_awaited()
         assert result.name == "My Ontology"
@@ -202,8 +203,6 @@ class TestGet:
         mock_db.execute.return_value = mock_result
 
         non_member = _make_user(user_id="stranger-id")
-        from fastapi import HTTPException
-
         with pytest.raises(HTTPException) as exc_info:
             await service.get(PROJECT_ID, non_member)
         assert exc_info.value.status_code == 403
@@ -214,8 +213,6 @@ class TestGet:
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         mock_db.execute.return_value = mock_result
-
-        from fastapi import HTTPException
 
         with pytest.raises(HTTPException) as exc_info:
             await service.get(uuid.uuid4(), _make_user())
@@ -261,8 +258,6 @@ class TestUpdate:
         editor = _make_user(user_id=EDITOR_ID)
         update_data = ProjectUpdate(name="Hacked Name")
 
-        from fastapi import HTTPException
-
         with pytest.raises(HTTPException) as exc_info:
             await service.update(PROJECT_ID, update_data, editor)
         assert exc_info.value.status_code == 403
@@ -305,8 +300,6 @@ class TestDelete:
         mock_db.execute.return_value = mock_result
 
         admin = _make_user(user_id=ADMIN_ID)
-
-        from fastapi import HTTPException
 
         with pytest.raises(HTTPException) as exc_info:
             await service.delete(PROJECT_ID, admin)
@@ -400,8 +393,6 @@ class TestAddMember:
         owner = _make_user(user_id=OWNER_ID)
         member_data = MemberCreate(user_id="new-user-id", role="owner")
 
-        from fastapi import HTTPException
-
         with pytest.raises(HTTPException) as exc_info:
             await service.add_member(PROJECT_ID, member_data, owner)
         assert exc_info.value.status_code == 400
@@ -430,11 +421,34 @@ class TestRemoveMember:
 
         admin = _make_user(user_id=ADMIN_ID)
 
-        from fastapi import HTTPException
-
         with pytest.raises(HTTPException) as exc_info:
             await service.remove_member(PROJECT_ID, OWNER_ID, admin)
         assert exc_info.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_owner_can_remove_member(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Owner can successfully remove a non-owner member."""
+        members = [
+            _make_member(OWNER_ID, "owner"),
+            _make_member(EDITOR_ID, "editor"),
+        ]
+        project = _make_project(members=members)
+        mock_result_project = MagicMock()
+        mock_result_project.scalar_one_or_none.return_value = project
+
+        editor_member = _make_member(EDITOR_ID, "editor")
+        mock_result_member = MagicMock()
+        mock_result_member.scalar_one_or_none.return_value = editor_member
+
+        mock_db.execute.side_effect = [mock_result_project, mock_result_member]
+
+        owner = _make_user(user_id=OWNER_ID)
+        await service.remove_member(PROJECT_ID, EDITOR_ID, owner)
+
+        mock_db.delete.assert_awaited()
+        mock_db.commit.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_editor_cannot_remove_others(
@@ -453,8 +467,6 @@ class TestRemoveMember:
 
         editor = _make_user(user_id=EDITOR_ID)
 
-        from fastapi import HTTPException
-
         with pytest.raises(HTTPException) as exc_info:
             await service.remove_member(PROJECT_ID, VIEWER_ID, editor)
         assert exc_info.value.status_code == 403
@@ -466,6 +478,44 @@ class TestRemoveMember:
 
 
 class TestTransferOwnership:
+    @pytest.mark.asyncio
+    async def test_transfer_ownership_success(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Owner can transfer ownership to an admin member."""
+        owner_member = _make_member(OWNER_ID, "owner")
+        admin_member = _make_member(ADMIN_ID, "admin")
+        project = _make_project(members=[owner_member, admin_member])
+        mock_result_project = MagicMock()
+        mock_result_project.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = mock_result_project
+
+        # After commit + refresh, list_members is called — mock its DB results
+        mock_members_result = MagicMock()
+        mock_members_result.scalars.return_value.all.return_value = [admin_member, owner_member]
+        mock_count_result = MagicMock()
+        mock_count_result.scalar_one.return_value = 2
+
+        mock_db.execute.side_effect = [
+            mock_result_project,  # _get_project
+            mock_count_result,  # list_members count
+            mock_members_result,  # list_members items
+        ]
+
+        owner = _make_user(user_id=OWNER_ID)
+        transfer = TransferOwnership(new_owner_id=ADMIN_ID)
+
+        with patch("ontokit.services.user_service.get_user_service") as mock_us:
+            mock_user_svc = MagicMock()
+            mock_user_svc.get_users_info = AsyncMock(return_value={})
+            mock_us.return_value = mock_user_svc
+
+            await service.transfer_ownership(PROJECT_ID, transfer, owner)
+
+        mock_db.commit.assert_awaited()
+        assert admin_member.role == "owner"
+        assert owner_member.role == "admin"
+
     @pytest.mark.asyncio
     async def test_transfer_to_non_admin_rejected(
         self, service: ProjectService, mock_db: AsyncMock
@@ -483,8 +533,6 @@ class TestTransferOwnership:
 
         owner = _make_user(user_id=OWNER_ID)
         transfer = TransferOwnership(new_owner_id=EDITOR_ID)
-
-        from fastapi import HTTPException
 
         with pytest.raises(HTTPException) as exc_info:
             await service.transfer_ownership(PROJECT_ID, transfer, owner)
@@ -506,8 +554,6 @@ class TestTransferOwnership:
 
         admin = _make_user(user_id=ADMIN_ID)
         transfer = TransferOwnership(new_owner_id=ADMIN_ID)
-
-        from fastapi import HTTPException
 
         with pytest.raises(HTTPException) as exc_info:
             await service.transfer_ownership(PROJECT_ID, transfer, admin)
