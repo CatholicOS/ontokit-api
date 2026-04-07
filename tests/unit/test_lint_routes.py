@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
@@ -205,9 +206,6 @@ class TestGetLintRun:
         """Returns run details with issues when run exists."""
         client, mock_session = authed_client
         mock_access.return_value = Mock()
-
-        from datetime import UTC, datetime
-        from uuid import uuid4
 
         run_uuid = UUID(RUN_ID)
         project_uuid = UUID(PROJECT_ID)
