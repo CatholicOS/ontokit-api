@@ -759,7 +759,7 @@ class BareOntologyRepository:
 
             for commit in self.repo.walk(to_commit.id, pygit2.enums.SortMode.TIME):
                 if str(commit.id) in from_ancestors:
-                    break
+                    continue
                 commits.append(self._commit_to_info(commit))
 
         except Exception:

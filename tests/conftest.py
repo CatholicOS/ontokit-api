@@ -171,7 +171,7 @@ def mock_github_service() -> Mock:
     service.list_user_repos = AsyncMock(return_value=[])
     service.scan_ontology_files = AsyncMock(return_value=[])
     service.get_file_content = AsyncMock(return_value=b"# empty")
-    service.verify_webhook_signature = AsyncMock(return_value=True)
+    service.verify_webhook_signature = Mock(return_value=True)
     return service
 
 

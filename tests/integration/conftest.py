@@ -33,13 +33,13 @@ async def real_db_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 @pytest_asyncio.fixture
-async def real_redis() -> AsyncGenerator:
+async def real_redis() -> AsyncGenerator[object, None]:
     """Create a real Redis client."""
     if not _REDIS_URL:
         pytest.skip("REDIS_URL not set")
 
     import redis.asyncio as aioredis
 
-    client = aioredis.from_url(_REDIS_URL)
+    client = aioredis.from_url(_REDIS_URL)  # type: ignore[no-untyped-call]
     yield client
     await client.aclose()
