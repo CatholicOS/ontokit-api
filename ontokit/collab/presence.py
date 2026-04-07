@@ -1,6 +1,6 @@
 """User presence tracking for collaboration sessions."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from ontokit.collab.protocol import User
 
@@ -37,7 +37,7 @@ class PresenceTracker:
         user.color = self._colors[user_count % len(self._colors)]
 
         self._rooms[room][user.user_id] = user
-        self._last_seen[user.user_id] = datetime.utcnow()
+        self._last_seen[user.user_id] = datetime.now(tz=UTC)
 
         return list(self._rooms[room].values())
 
@@ -57,7 +57,7 @@ class PresenceTracker:
         """Update user's cursor position."""
         if room in self._rooms and user_id in self._rooms[room]:
             self._rooms[room][user_id].cursor_path = path
-            self._last_seen[user_id] = datetime.utcnow()
+            self._last_seen[user_id] = datetime.now(tz=UTC)
 
     def get_users(self, room: str) -> list[User]:
         """Get all users in a room."""
@@ -65,7 +65,7 @@ class PresenceTracker:
 
     def heartbeat(self, user_id: str) -> None:
         """Update last seen timestamp for a user."""
-        self._last_seen[user_id] = datetime.utcnow()
+        self._last_seen[user_id] = datetime.now(tz=UTC)
 
     def cleanup_stale(self, timeout_minutes: int = 5) -> list[tuple[str, str]]:
         """
@@ -73,7 +73,7 @@ class PresenceTracker:
 
         Returns list of (room, user_id) tuples for removed users.
         """
-        cutoff = datetime.utcnow() - timedelta(minutes=timeout_minutes)
+        cutoff = datetime.now(tz=UTC) - timedelta(minutes=timeout_minutes)
         removed = []
 
         for room, users in list(self._rooms.items()):

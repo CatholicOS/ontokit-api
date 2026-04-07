@@ -1,6 +1,6 @@
 """Tests for the Operational Transformation module."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from ontokit.collab.protocol import Operation, OperationType
 from ontokit.collab.transform import _is_delete, transform, transform_against_history
@@ -20,7 +20,7 @@ def _make_op(
         id=op_id,
         type=op_type,
         path=path,
-        timestamp=timestamp or datetime.utcnow(),
+        timestamp=timestamp or datetime.now(tz=UTC),
         user_id=user_id,
         version=version,
     )
@@ -31,7 +31,7 @@ class TestTransformSamePath:
 
     def test_later_timestamp_wins(self) -> None:
         """The operation with the later timestamp wins (last-write-wins)."""
-        now = datetime.utcnow()
+        now = datetime.now(tz=UTC)
         op1 = _make_op(path="/classes/Person", timestamp=now + timedelta(seconds=1), op_id="op-1")
         op2 = _make_op(path="/classes/Person", timestamp=now, op_id="op-2")
 
@@ -41,7 +41,7 @@ class TestTransformSamePath:
 
     def test_earlier_timestamp_loses(self) -> None:
         """The operation with the earlier timestamp becomes a no-op."""
-        now = datetime.utcnow()
+        now = datetime.now(tz=UTC)
         op1 = _make_op(path="/classes/Person", timestamp=now, op_id="op-1")
         op2 = _make_op(path="/classes/Person", timestamp=now + timedelta(seconds=1), op_id="op-2")
 
@@ -51,7 +51,7 @@ class TestTransformSamePath:
 
     def test_equal_timestamps_op2_wins(self) -> None:
         """With equal timestamps, op2 wins (else branch)."""
-        now = datetime.utcnow()
+        now = datetime.now(tz=UTC)
         op1 = _make_op(path="/classes/Person", timestamp=now, op_id="op-1")
         op2 = _make_op(path="/classes/Person", timestamp=now, op_id="op-2")
 
@@ -230,7 +230,7 @@ class TestTransformAgainstHistory:
 
     def test_transforms_against_higher_version(self) -> None:
         """Operations with higher versions cause transformation."""
-        now = datetime.utcnow()
+        now = datetime.now(tz=UTC)
         op = _make_op(
             path="/classes/Person",
             version=1,
@@ -252,7 +252,7 @@ class TestTransformAgainstHistory:
 
     def test_null_propagation_stops_early(self) -> None:
         """Once nullified, the operation stays None through remaining history."""
-        now = datetime.utcnow()
+        now = datetime.now(tz=UTC)
         op = _make_op(
             path="/classes/Person",
             version=1,

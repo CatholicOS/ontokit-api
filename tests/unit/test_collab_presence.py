@@ -1,6 +1,6 @@
 """Tests for the PresenceTracker collaboration module."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from ontokit.collab.presence import PresenceTracker
@@ -178,7 +178,7 @@ class TestUpdateCursor:
         old_time = tracker._last_seen["user1"]
 
         with patch("ontokit.collab.presence.datetime") as mock_dt:
-            mock_dt.utcnow.return_value = old_time + timedelta(seconds=10)
+            mock_dt.now.return_value = old_time + timedelta(seconds=10)
             tracker.update_cursor("room1", "user1", "/classes/Animal")
 
         assert tracker._last_seen["user1"] > old_time
@@ -236,7 +236,7 @@ class TestHeartbeat:
         old_time = tracker._last_seen["user1"]
 
         with patch("ontokit.collab.presence.datetime") as mock_dt:
-            mock_dt.utcnow.return_value = old_time + timedelta(seconds=30)
+            mock_dt.now.return_value = old_time + timedelta(seconds=30)
             tracker.heartbeat("user1")
 
         assert tracker._last_seen["user1"] > old_time
@@ -257,7 +257,7 @@ class TestCleanupStale:
         tracker.join("room1", _make_user("user1", "Alice"))
 
         # Backdate the last_seen timestamp
-        tracker._last_seen["user1"] = datetime.utcnow() - timedelta(minutes=10)
+        tracker._last_seen["user1"] = datetime.now(tz=UTC) - timedelta(minutes=10)
 
         removed = tracker.cleanup_stale(timeout_minutes=5)
         assert len(removed) == 1
@@ -280,7 +280,7 @@ class TestCleanupStale:
         tracker.join("room1", _make_user("user2", "Bob"))
 
         # Make user1 stale, keep user2 active
-        tracker._last_seen["user1"] = datetime.utcnow() - timedelta(minutes=10)
+        tracker._last_seen["user1"] = datetime.now(tz=UTC) - timedelta(minutes=10)
 
         removed = tracker.cleanup_stale(timeout_minutes=5)
         assert len(removed) == 1
@@ -291,7 +291,7 @@ class TestCleanupStale:
         """Rooms are removed when all users are cleaned up."""
         tracker = PresenceTracker()
         tracker.join("room1", _make_user("user1", "Alice"))
-        tracker._last_seen["user1"] = datetime.utcnow() - timedelta(minutes=10)
+        tracker._last_seen["user1"] = datetime.now(tz=UTC) - timedelta(minutes=10)
 
         tracker.cleanup_stale(timeout_minutes=5)
         assert tracker.get_room_count() == 0
@@ -302,8 +302,8 @@ class TestCleanupStale:
         tracker.join("room1", _make_user("user1", "Alice"))
         tracker.join("room2", _make_user("user2", "Bob"))
 
-        tracker._last_seen["user1"] = datetime.utcnow() - timedelta(minutes=10)
-        tracker._last_seen["user2"] = datetime.utcnow() - timedelta(minutes=10)
+        tracker._last_seen["user1"] = datetime.now(tz=UTC) - timedelta(minutes=10)
+        tracker._last_seen["user2"] = datetime.now(tz=UTC) - timedelta(minutes=10)
 
         removed = tracker.cleanup_stale(timeout_minutes=5)
         assert len(removed) == 2
@@ -313,12 +313,12 @@ class TestCleanupStale:
         """Default timeout is 5 minutes."""
         tracker = PresenceTracker()
         tracker.join("room1", _make_user("user1", "Alice"))
-        tracker._last_seen["user1"] = datetime.utcnow() - timedelta(minutes=4)
+        tracker._last_seen["user1"] = datetime.now(tz=UTC) - timedelta(minutes=4)
 
         removed = tracker.cleanup_stale()
         assert removed == []
 
-        tracker._last_seen["user1"] = datetime.utcnow() - timedelta(minutes=6)
+        tracker._last_seen["user1"] = datetime.now(tz=UTC) - timedelta(minutes=6)
         removed = tracker.cleanup_stale()
         assert len(removed) == 1
 
