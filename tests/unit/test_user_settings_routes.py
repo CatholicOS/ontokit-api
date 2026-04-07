@@ -66,26 +66,27 @@ class TestSaveGitHubToken:
         mock_github.get_authenticated_user.return_value = ("octocat", "repo,read:org")
         app.dependency_overrides[get_github_service] = lambda: mock_github
 
-        # No existing token
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_session.execute.return_value = mock_result
+        try:
+            # No existing token
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = None
+            mock_session.execute.return_value = mock_result
 
-        now = datetime.now(UTC)
-        mock_session.refresh.side_effect = lambda obj: (
-            setattr(obj, "created_at", now) or setattr(obj, "updated_at", now)
-        )
+            now = datetime.now(UTC)
+            mock_session.refresh.side_effect = lambda obj: (
+                setattr(obj, "created_at", now) or setattr(obj, "updated_at", now)
+            )
 
-        response = client.post(
-            "/api/v1/users/me/github-token",
-            json={"token": "ghp_testtoken1234567890"},
-        )
-        assert response.status_code == 201
-        data = response.json()
-        assert data["github_username"] == "octocat"
-        assert data["token_scopes"] == "repo,read:org"
-
-        app.dependency_overrides.pop(get_github_service, None)
+            response = client.post(
+                "/api/v1/users/me/github-token",
+                json={"token": "ghp_testtoken1234567890"},
+            )
+            assert response.status_code == 201
+            data = response.json()
+            assert data["github_username"] == "octocat"
+            assert data["token_scopes"] == "repo,read:org"
+        finally:
+            app.dependency_overrides.pop(get_github_service, None)
 
     def test_save_token_invalid(self, authed_client: tuple[TestClient, AsyncMock]) -> None:
         """Returns 400 when GitHub rejects the token."""
@@ -95,14 +96,15 @@ class TestSaveGitHubToken:
         mock_github.get_authenticated_user.side_effect = Exception("Bad credentials")
         app.dependency_overrides[get_github_service] = lambda: mock_github
 
-        response = client.post(
-            "/api/v1/users/me/github-token",
-            json={"token": "ghp_badtoken"},
-        )
-        assert response.status_code == 400
-        assert "Invalid GitHub token" in response.json()["detail"]
-
-        app.dependency_overrides.pop(get_github_service, None)
+        try:
+            response = client.post(
+                "/api/v1/users/me/github-token",
+                json={"token": "ghp_badtoken"},
+            )
+            assert response.status_code == 400
+            assert "Invalid GitHub token" in response.json()["detail"]
+        finally:
+            app.dependency_overrides.pop(get_github_service, None)
 
     def test_save_token_missing_repo_scope(
         self, authed_client: tuple[TestClient, AsyncMock]
@@ -114,14 +116,15 @@ class TestSaveGitHubToken:
         mock_github.get_authenticated_user.return_value = ("octocat", "read:org")
         app.dependency_overrides[get_github_service] = lambda: mock_github
 
-        response = client.post(
-            "/api/v1/users/me/github-token",
-            json={"token": "ghp_norepo"},
-        )
-        assert response.status_code == 400
-        assert "repo" in response.json()["detail"].lower()
-
-        app.dependency_overrides.pop(get_github_service, None)
+        try:
+            response = client.post(
+                "/api/v1/users/me/github-token",
+                json={"token": "ghp_norepo"},
+            )
+            assert response.status_code == 400
+            assert "repo" in response.json()["detail"].lower()
+        finally:
+            app.dependency_overrides.pop(get_github_service, None)
 
 
 class TestDeleteGitHubToken:
@@ -185,13 +188,14 @@ class TestListGitHubRepos:
         ]
         app.dependency_overrides[get_github_service] = lambda: mock_github
 
-        response = client.get("/api/v1/users/me/github-repos")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total"] == 1
-        assert data["items"][0]["full_name"] == "octocat/hello-world"
-
-        app.dependency_overrides.pop(get_github_service, None)
+        try:
+            response = client.get("/api/v1/users/me/github-repos")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["total"] == 1
+            assert data["items"][0]["full_name"] == "octocat/hello-world"
+        finally:
+            app.dependency_overrides.pop(get_github_service, None)
 
     def test_list_repos_no_token(self, authed_client: tuple[TestClient, AsyncMock]) -> None:
         """Returns 400 when user has no stored token."""
@@ -220,13 +224,14 @@ class TestSearchUsers:
         )
         app.dependency_overrides[get_user_service] = lambda: mock_user_svc
 
-        response = client.get("/api/v1/users/search", params={"q": "alice"})
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total"] == 1
-        assert data["items"][0]["username"] == "alice"
-
-        app.dependency_overrides.pop(get_user_service, None)
+        try:
+            response = client.get("/api/v1/users/search", params={"q": "alice"})
+            assert response.status_code == 200
+            data = response.json()
+            assert data["total"] == 1
+            assert data["items"][0]["username"] == "alice"
+        finally:
+            app.dependency_overrides.pop(get_user_service, None)
 
     def test_search_users_query_too_short(
         self, authed_client: tuple[TestClient, AsyncMock]
