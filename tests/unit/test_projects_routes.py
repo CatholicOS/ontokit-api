@@ -1,6 +1,9 @@
 """Tests for project and search routes."""
 
+from __future__ import annotations
+
 from collections.abc import AsyncGenerator, Generator
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -10,6 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ontokit import __version__
 from ontokit.core.database import get_db
 from ontokit.main import app
+
+
+async def _noop_verify_access(*_args: Any, **_kwargs: Any) -> None:  # noqa: ARG001
+    """No-op replacement for verify_project_access in tests."""
 
 
 @pytest.fixture
@@ -80,10 +87,8 @@ class TestSearchRoute:
         response = client.get("/api/v1/search")
         assert response.status_code == 422
 
-    @patch("ontokit.api.routes.search.verify_project_access", new_callable=AsyncMock)
-    def test_sparql_blocks_insert(
-        self, _mock_access: AsyncMock, mock_db_client: TestClient
-    ) -> None:
+    @patch("ontokit.api.routes.search.verify_project_access", _noop_verify_access)
+    def test_sparql_blocks_insert(self, mock_db_client: TestClient) -> None:
         """POST /api/v1/search/sparql with INSERT query returns 400."""
         response = mock_db_client.post(
             "/api/v1/search/sparql",
@@ -95,10 +100,8 @@ class TestSearchRoute:
         assert response.status_code == 400
         assert "not allowed" in response.json()["detail"].lower()
 
-    @patch("ontokit.api.routes.search.verify_project_access", new_callable=AsyncMock)
-    def test_sparql_blocks_delete(
-        self, _mock_access: AsyncMock, mock_db_client: TestClient
-    ) -> None:
+    @patch("ontokit.api.routes.search.verify_project_access", _noop_verify_access)
+    def test_sparql_blocks_delete(self, mock_db_client: TestClient) -> None:
         """POST /api/v1/search/sparql with DELETE query returns 400."""
         response = mock_db_client.post(
             "/api/v1/search/sparql",
@@ -109,8 +112,8 @@ class TestSearchRoute:
         )
         assert response.status_code == 400
 
-    @patch("ontokit.api.routes.search.verify_project_access", new_callable=AsyncMock)
-    def test_sparql_blocks_drop(self, _mock_access: AsyncMock, mock_db_client: TestClient) -> None:
+    @patch("ontokit.api.routes.search.verify_project_access", _noop_verify_access)
+    def test_sparql_blocks_drop(self, mock_db_client: TestClient) -> None:
         """POST /api/v1/search/sparql with DROP query returns 400."""
         response = mock_db_client.post(
             "/api/v1/search/sparql",
@@ -121,8 +124,8 @@ class TestSearchRoute:
         )
         assert response.status_code == 400
 
-    @patch("ontokit.api.routes.search.verify_project_access", new_callable=AsyncMock)
-    def test_sparql_blocks_clear(self, _mock_access: AsyncMock, mock_db_client: TestClient) -> None:
+    @patch("ontokit.api.routes.search.verify_project_access", _noop_verify_access)
+    def test_sparql_blocks_clear(self, mock_db_client: TestClient) -> None:
         """POST /api/v1/search/sparql with CLEAR query returns 400."""
         response = mock_db_client.post(
             "/api/v1/search/sparql",
@@ -133,10 +136,8 @@ class TestSearchRoute:
         )
         assert response.status_code == 400
 
-    @patch("ontokit.api.routes.search.verify_project_access", new_callable=AsyncMock)
-    def test_sparql_blocks_create(
-        self, _mock_access: AsyncMock, mock_db_client: TestClient
-    ) -> None:
+    @patch("ontokit.api.routes.search.verify_project_access", _noop_verify_access)
+    def test_sparql_blocks_create(self, mock_db_client: TestClient) -> None:
         """POST /api/v1/search/sparql with CREATE query returns 400."""
         response = mock_db_client.post(
             "/api/v1/search/sparql",
