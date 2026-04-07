@@ -1,4 +1,3 @@
-# ruff: noqa: ARG001, ARG002
 """Tests for quality routes (cross-references, consistency, duplicates)."""
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ class TestGetEntityReferences:
     @patch("ontokit.api.routes.quality.verify_project_access", new_callable=AsyncMock)
     def test_get_references_success(
         self,
-        mock_access: AsyncMock,
+        mock_access: AsyncMock,  # noqa: ARG002
         mock_load: AsyncMock,
         mock_xrefs: MagicMock,
         authed_client: tuple[TestClient, AsyncMock],
@@ -50,7 +49,7 @@ class TestGetEntityReferences:
     @patch("ontokit.api.routes.quality.verify_project_access", new_callable=AsyncMock)
     def test_get_references_with_branch(
         self,
-        mock_access: AsyncMock,
+        mock_access: AsyncMock,  # noqa: ARG002
         mock_load: AsyncMock,
         mock_xrefs: MagicMock,
         authed_client: tuple[TestClient, AsyncMock],
@@ -86,7 +85,7 @@ class TestTriggerConsistencyCheck:
     @patch("ontokit.api.routes.quality.verify_project_access", new_callable=AsyncMock)
     def test_trigger_check_success(
         self,
-        mock_access: AsyncMock,
+        mock_access: AsyncMock,  # noqa: ARG002
         mock_load: AsyncMock,
         mock_check: MagicMock,
         mock_redis_fn: MagicMock,
@@ -117,7 +116,7 @@ class TestTriggerConsistencyCheck:
     @patch("ontokit.api.routes.quality.verify_project_access", new_callable=AsyncMock)
     def test_trigger_check_redis_failure_still_succeeds(
         self,
-        mock_access: AsyncMock,
+        mock_access: AsyncMock,  # noqa: ARG002
         mock_load: AsyncMock,
         mock_check: MagicMock,
         mock_redis_fn: MagicMock,
@@ -147,7 +146,7 @@ class TestGetQualityJobResult:
     @patch("ontokit.api.routes.quality.verify_project_access", new_callable=AsyncMock)
     def test_get_job_result_cached(
         self,
-        mock_access: AsyncMock,
+        mock_access: AsyncMock,  # noqa: ARG002
         mock_redis_fn: MagicMock,
         authed_client: tuple[TestClient, AsyncMock],
     ) -> None:
@@ -178,7 +177,7 @@ class TestGetQualityJobResult:
     @patch("ontokit.api.routes.quality.verify_project_access", new_callable=AsyncMock)
     def test_get_job_result_not_found(
         self,
-        mock_access: AsyncMock,
+        mock_access: AsyncMock,  # noqa: ARG002
         mock_redis_fn: MagicMock,
         authed_client: tuple[TestClient, AsyncMock],
     ) -> None:
@@ -202,7 +201,7 @@ class TestDetectDuplicates:
     @patch("ontokit.api.routes.quality.verify_project_access", new_callable=AsyncMock)
     def test_detect_duplicates_success(
         self,
-        mock_access: AsyncMock,
+        mock_access: AsyncMock,  # noqa: ARG002
         mock_load: AsyncMock,
         mock_find: MagicMock,
         authed_client: tuple[TestClient, AsyncMock],
@@ -229,7 +228,7 @@ class TestDetectDuplicates:
     @patch("ontokit.api.routes.quality.verify_project_access", new_callable=AsyncMock)
     def test_detect_duplicates_custom_threshold(
         self,
-        mock_access: AsyncMock,
+        mock_access: AsyncMock,  # noqa: ARG002
         mock_load: AsyncMock,
         mock_find: MagicMock,
         authed_client: tuple[TestClient, AsyncMock],

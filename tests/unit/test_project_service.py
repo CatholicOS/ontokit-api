@@ -1,4 +1,3 @@
-# ruff: noqa: ARG001, ARG002
 """Tests for ProjectService (ontokit/services/project_service.py)."""
 
 from __future__ import annotations
