@@ -48,8 +48,8 @@ class TestGetFernet:
             get_fernet()
         assert exc_info.value.status_code == 500
 
-    def test_caches_instance(self) -> None:
-        """Successive calls with same key produce equivalent Fernet instances."""
+    def test_get_fernet_instances_are_compatible(self) -> None:
+        """Successive calls produce Fernet instances that can decrypt each other's output."""
         f1 = get_fernet()
         f2 = get_fernet()
         # Both should be valid Fernet instances that can decrypt each other's output
