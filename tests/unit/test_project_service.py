@@ -390,8 +390,10 @@ class TestAddMember:
 class TestRemoveMember:
     @pytest.mark.asyncio
     async def test_cannot_remove_owner(self, service: ProjectService, mock_db: AsyncMock) -> None:
-        """The owner cannot be removed."""
-        project = _make_project()
+        """An admin cannot remove the project owner."""
+        project = _make_project(
+            members=[_make_member(OWNER_ID, "owner"), _make_member(ADMIN_ID, "admin")]
+        )
         mock_result_project = MagicMock()
         mock_result_project.scalar_one_or_none.return_value = project
 
@@ -401,7 +403,7 @@ class TestRemoveMember:
 
         mock_db.execute.side_effect = [mock_result_project, mock_result_member]
 
-        admin = _make_user(user_id=OWNER_ID)
+        admin = _make_user(user_id=ADMIN_ID)
 
         from fastapi import HTTPException
 
