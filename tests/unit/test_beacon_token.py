@@ -33,10 +33,10 @@ def test_verify_beacon_token_expired() -> None:
     # Simulate expiry by patching time
     original_time = time.time
     try:
-        time.time = lambda: original_time() + 10  # type: ignore[assignment]
+        time.time = lambda: original_time() + 10
         assert verify_beacon_token(token) is None
     finally:
-        time.time = original_time  # type: ignore[assignment]
+        time.time = original_time
 
 
 def test_verify_beacon_token_invalid() -> None:
