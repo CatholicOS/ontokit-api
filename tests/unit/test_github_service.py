@@ -310,6 +310,244 @@ class TestScopeHelpers:
         assert GitHubService.has_hook_write_scope("repo, read:repo_hook") is False
 
 
+class TestCreatePullRequest:
+    """Tests for create_pull_request()."""
+
+    @pytest.mark.asyncio
+    async def test_creates_pr(self, github_service: GitHubService) -> None:
+        """Creates a PR and returns a GitHubPR dataclass."""
+        pr_data = {
+            "number": 42,
+            "title": "Add Person class",
+            "body": "Adds Person to the ontology",
+            "state": "open",
+            "html_url": "https://github.com/org/repo/pull/42",
+            "head": {"ref": "feature/person"},
+            "base": {"ref": "main"},
+            "user": {"login": "octocat"},
+            "created_at": "2024-01-15T10:00:00Z",
+            "updated_at": "2024-01-15T10:00:00Z",
+            "merged_at": None,
+            "merged": False,
+        }
+        mock_resp = _mock_response(200, pr_data)
+        mock_client = _make_async_client(request_response=mock_resp)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            pr = await github_service.create_pull_request(
+                TOKEN, "org", "repo", "Add Person class", "feature/person", "main"
+            )
+
+        assert pr.number == 42
+        assert pr.title == "Add Person class"
+        assert pr.head_ref == "feature/person"
+        assert pr.base_ref == "main"
+
+
+class TestListPullRequests:
+    """Tests for list_pull_requests()."""
+
+    @pytest.mark.asyncio
+    async def test_returns_pr_list(self, github_service: GitHubService) -> None:
+        """Returns a list of GitHubPR objects."""
+        pr_list = [
+            {
+                "number": 1,
+                "title": "PR 1",
+                "body": None,
+                "state": "open",
+                "html_url": "https://github.com/org/repo/pull/1",
+                "head": {"ref": "branch-1"},
+                "base": {"ref": "main"},
+                "user": {"login": "octocat"},
+                "created_at": "2024-01-10T10:00:00Z",
+                "updated_at": "2024-01-10T12:00:00Z",
+                "merged_at": None,
+                "merged": False,
+            },
+        ]
+        mock_resp = _mock_response(200, pr_list)
+        mock_client = _make_async_client(request_response=mock_resp)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            prs = await github_service.list_pull_requests(TOKEN, "org", "repo")
+
+        assert len(prs) == 1
+        assert prs[0].number == 1
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_for_non_list_response(self, github_service: GitHubService) -> None:
+        """Returns empty list when response is not a list."""
+        mock_resp = _mock_response(200, {})
+        mock_client = _make_async_client(request_response=mock_resp)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            prs = await github_service.list_pull_requests(TOKEN, "org", "repo")
+
+        assert prs == []
+
+
+class TestGetPullRequest:
+    """Tests for get_pull_request()."""
+
+    @pytest.mark.asyncio
+    async def test_returns_single_pr(self, github_service: GitHubService) -> None:
+        """Returns a single GitHubPR by number."""
+        pr_data = {
+            "number": 5,
+            "title": "Fix ontology",
+            "body": "Fixed a class issue",
+            "state": "closed",
+            "html_url": "https://github.com/org/repo/pull/5",
+            "head": {"ref": "fix/class"},
+            "base": {"ref": "main"},
+            "user": {"login": "dev"},
+            "created_at": "2024-02-01T10:00:00Z",
+            "updated_at": "2024-02-02T08:00:00Z",
+            "merged_at": "2024-02-02T08:00:00Z",
+            "merged": True,
+        }
+        mock_resp = _mock_response(200, pr_data)
+        mock_client = _make_async_client(request_response=mock_resp)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            pr = await github_service.get_pull_request(TOKEN, "org", "repo", 5)
+
+        assert pr.number == 5
+        assert pr.merged is True
+        assert pr.merged_at is not None
+
+
+class TestCreateReview:
+    """Tests for create_review()."""
+
+    @pytest.mark.asyncio
+    async def test_creates_review(self, github_service: GitHubService) -> None:
+        """Creates a review and returns a GitHubReview."""
+        review_data = {
+            "id": 100,
+            "user": {"login": "reviewer"},
+            "state": "APPROVED",
+            "body": "LGTM",
+            "submitted_at": "2024-01-20T15:00:00Z",
+        }
+        mock_resp = _mock_response(200, review_data)
+        mock_client = _make_async_client(request_response=mock_resp)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            review = await github_service.create_review(
+                TOKEN, "org", "repo", 42, "APPROVE", body="LGTM"
+            )
+
+        assert review.id == 100
+        assert review.state == "APPROVED"
+        assert review.user_login == "reviewer"
+
+
+class TestListReviews:
+    """Tests for list_reviews()."""
+
+    @pytest.mark.asyncio
+    async def test_returns_reviews(self, github_service: GitHubService) -> None:
+        """Returns a list of GitHubReview objects."""
+        reviews = [
+            {
+                "id": 200,
+                "user": {"login": "reviewer1"},
+                "state": "COMMENTED",
+                "body": "Needs work",
+                "submitted_at": "2024-01-21T10:00:00Z",
+            },
+        ]
+        mock_resp = _mock_response(200, reviews)
+        mock_client = _make_async_client(request_response=mock_resp)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await github_service.list_reviews(TOKEN, "org", "repo", 42)
+
+        assert len(result) == 1
+        assert result[0].id == 200
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_for_non_list(self, github_service: GitHubService) -> None:
+        """Returns empty list when response is not a list."""
+        mock_resp = _mock_response(200, {})
+        mock_client = _make_async_client(request_response=mock_resp)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await github_service.list_reviews(TOKEN, "org", "repo", 42)
+
+        assert result == []
+
+
+class TestCreateComment:
+    """Tests for create_comment()."""
+
+    @pytest.mark.asyncio
+    async def test_creates_comment(self, github_service: GitHubService) -> None:
+        """Creates a comment and returns a GitHubComment."""
+        comment_data = {
+            "id": 300,
+            "user": {"login": "commenter"},
+            "body": "Great work!",
+            "created_at": "2024-01-22T12:00:00Z",
+            "updated_at": "2024-01-22T12:00:00Z",
+        }
+        mock_resp = _mock_response(200, comment_data)
+        mock_client = _make_async_client(request_response=mock_resp)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            comment = await github_service.create_comment(TOKEN, "org", "repo", 42, "Great work!")
+
+        assert comment.id == 300
+        assert comment.body == "Great work!"
+        assert comment.user_login == "commenter"
+
+
+class TestListComments:
+    """Tests for list_comments()."""
+
+    @pytest.mark.asyncio
+    async def test_returns_comments(self, github_service: GitHubService) -> None:
+        """Returns a list of GitHubComment objects."""
+        comments = [
+            {
+                "id": 400,
+                "user": {"login": "user1"},
+                "body": "Comment 1",
+                "created_at": "2024-01-23T10:00:00Z",
+                "updated_at": "2024-01-23T10:00:00Z",
+            },
+            {
+                "id": 401,
+                "user": {"login": "user2"},
+                "body": "Comment 2",
+                "created_at": "2024-01-23T11:00:00Z",
+                "updated_at": "2024-01-23T11:00:00Z",
+            },
+        ]
+        mock_resp = _mock_response(200, comments)
+        mock_client = _make_async_client(request_response=mock_resp)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await github_service.list_comments(TOKEN, "org", "repo", 42)
+
+        assert len(result) == 2
+        assert result[0].body == "Comment 1"
+        assert result[1].body == "Comment 2"
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_for_non_list(self, github_service: GitHubService) -> None:
+        """Returns empty list when response is not a list."""
+        mock_resp = _mock_response(200, {})
+        mock_client = _make_async_client(request_response=mock_resp)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await github_service.list_comments(TOKEN, "org", "repo", 42)
+
+        assert result == []
+
+
 class TestGetGitHubService:
     """Tests for the factory function."""
 

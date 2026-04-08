@@ -474,3 +474,264 @@ class TestGetClassDetail:
         assert result is not None
         assert result["iri"] == "http://example.org/Person"
         assert result["child_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_get_class_detail_with_labels_and_parents(
+        self, service: OntologyIndexService, mock_db: AsyncMock
+    ) -> None:
+        """get_class_detail returns labels, comments, parents, and annotations."""
+        import uuid as _uuid
+
+        entity_id = _uuid.uuid4()
+        entity = MagicMock()
+        entity.id = entity_id
+        entity.iri = "http://example.org/Person"
+        entity.local_name = "Person"
+        entity.entity_type = "class"
+        entity.deprecated = False
+
+        # Entity lookup
+        mock_entity_result = MagicMock()
+        mock_entity_result.scalar_one_or_none.return_value = entity
+
+        # Labels
+        mock_label = MagicMock()
+        mock_label.value = "Person"
+        mock_label.lang = "en"
+        mock_labels = MagicMock()
+        mock_labels.scalars.return_value.all.return_value = [mock_label]
+
+        # Comments
+        mock_comment = MagicMock()
+        mock_comment.value = "A human being"
+        mock_comment.lang = "en"
+        mock_comments = MagicMock()
+        mock_comments.scalars.return_value.all.return_value = [mock_comment]
+
+        # Parents
+        mock_parents = MagicMock()
+        mock_parents.all.return_value = [("http://example.org/Agent",)]
+
+        # Parent label resolution: entity lookup + labels
+        parent_entity = MagicMock()
+        parent_entity.id = _uuid.uuid4()
+        parent_entity.iri = "http://example.org/Agent"
+        mock_parent_entities = MagicMock()
+        mock_parent_entities.all.return_value = [parent_entity]
+
+        mock_parent_labels = MagicMock()
+        parent_label = MagicMock()
+        parent_label.entity_id = parent_entity.id
+        parent_label.property_iri = str(
+            __import__("rdflib.namespace", fromlist=["RDFS"]).RDFS.label
+        )
+        parent_label.value = "Agent"
+        parent_label.lang = "en"
+        mock_parent_labels.scalars.return_value.all.return_value = [parent_label]
+
+        # Child count
+        mock_child_count = MagicMock()
+        mock_child_count.scalar.return_value = 5
+
+        # Annotations
+        mock_annotations = MagicMock()
+        mock_annotations.scalars.return_value.all.return_value = []
+
+        mock_db.execute.side_effect = [
+            mock_entity_result,
+            mock_labels,
+            mock_comments,
+            mock_parents,
+            mock_parent_entities,
+            mock_parent_labels,
+            mock_child_count,
+            mock_annotations,
+        ]
+
+        result = await service.get_class_detail(PROJECT_ID, BRANCH, "http://example.org/Person")
+        assert result is not None
+        assert result["labels"] == [{"value": "Person", "lang": "en"}]
+        assert result["comments"] == [{"value": "A human being", "lang": "en"}]
+        assert "http://example.org/Agent" in result["parent_iris"]
+        assert result["child_count"] == 5
+        assert result["instance_count"] is None
+
+
+# ---------------------------------------------------------------------------
+# get_root_classes (SQL-based)
+# ---------------------------------------------------------------------------
+
+
+class TestGetRootClasses:
+    @pytest.mark.asyncio
+    async def test_returns_root_classes(
+        self, service: OntologyIndexService, mock_db: AsyncMock
+    ) -> None:
+        """get_root_classes returns classes not appearing as children."""
+        # Main query returns root class rows
+        root_row = MagicMock()
+        root_row.iri = "http://example.org/Animal"
+        root_row.local_name = "Animal"
+        root_row.deprecated = False
+        root_row.child_count = 2
+
+        mock_roots_result = MagicMock()
+        mock_roots_result.all.return_value = [root_row]
+
+        # Label resolution: entities + labels
+        entity_row = MagicMock()
+        entity_row.id = uuid.uuid4()
+        entity_row.iri = "http://example.org/Animal"
+        mock_entities = MagicMock()
+        mock_entities.all.return_value = [entity_row]
+
+        mock_label = MagicMock()
+        mock_label.entity_id = entity_row.id
+        mock_label.property_iri = str(__import__("rdflib.namespace", fromlist=["RDFS"]).RDFS.label)
+        mock_label.value = "Animal"
+        mock_label.lang = "en"
+        mock_labels = MagicMock()
+        mock_labels.scalars.return_value.all.return_value = [mock_label]
+
+        mock_db.execute.side_effect = [mock_roots_result, mock_entities, mock_labels]
+
+        result = await service.get_root_classes(PROJECT_ID, BRANCH)
+        assert len(result) == 1
+        assert result[0]["iri"] == "http://example.org/Animal"
+        assert result[0]["label"] == "Animal"
+        assert result[0]["child_count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_no_classes(
+        self, service: OntologyIndexService, mock_db: AsyncMock
+    ) -> None:
+        """get_root_classes returns empty list when no classes exist."""
+        mock_result = MagicMock()
+        mock_result.all.return_value = []
+        mock_db.execute.return_value = mock_result
+
+        result = await service.get_root_classes(PROJECT_ID, BRANCH)
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# get_class_children (SQL-based)
+# ---------------------------------------------------------------------------
+
+
+class TestGetClassChildren:
+    @pytest.mark.asyncio
+    async def test_returns_children(
+        self, service: OntologyIndexService, mock_db: AsyncMock
+    ) -> None:
+        """get_class_children returns direct children of a class."""
+        child_row = MagicMock()
+        child_row.iri = "http://example.org/Dog"
+        child_row.local_name = "Dog"
+        child_row.deprecated = False
+        child_row.child_count = 0
+
+        mock_children_result = MagicMock()
+        mock_children_result.all.return_value = [child_row]
+
+        # Label resolution
+        entity_row = MagicMock()
+        entity_row.id = uuid.uuid4()
+        entity_row.iri = "http://example.org/Dog"
+        mock_entities = MagicMock()
+        mock_entities.all.return_value = [entity_row]
+
+        mock_labels = MagicMock()
+        mock_labels.scalars.return_value.all.return_value = []
+
+        mock_db.execute.side_effect = [mock_children_result, mock_entities, mock_labels]
+
+        result = await service.get_class_children(PROJECT_ID, BRANCH, "http://example.org/Animal")
+        assert len(result) == 1
+        assert result[0]["iri"] == "http://example.org/Dog"
+        assert result[0]["label"] == "Dog"  # falls back to local_name
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_for_leaf(
+        self, service: OntologyIndexService, mock_db: AsyncMock
+    ) -> None:
+        """get_class_children returns empty for a leaf class."""
+        mock_result = MagicMock()
+        mock_result.all.return_value = []
+        mock_db.execute.return_value = mock_result
+
+        result = await service.get_class_children(PROJECT_ID, BRANCH, "http://example.org/Leaf")
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# get_ancestor_path (SQL-based)
+# ---------------------------------------------------------------------------
+
+
+class TestGetAncestorPath:
+    @pytest.mark.asyncio
+    async def test_returns_empty_for_missing_entity(
+        self, service: OntologyIndexService, mock_db: AsyncMock
+    ) -> None:
+        """get_ancestor_path returns empty for non-existent entity."""
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute.return_value = mock_result
+
+        result = await service.get_ancestor_path(PROJECT_ID, BRANCH, "http://example.org/Missing")
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_for_root_class(
+        self, service: OntologyIndexService, mock_db: AsyncMock
+    ) -> None:
+        """get_ancestor_path returns empty for a root class (no ancestors)."""
+        # Entity exists
+        mock_exists = MagicMock()
+        mock_exists.scalar_one_or_none.return_value = "http://example.org/Root"
+
+        # CTE returns no ancestors
+        mock_cte = MagicMock()
+        mock_cte.all.return_value = []
+
+        mock_db.execute.side_effect = [mock_exists, mock_cte]
+
+        result = await service.get_ancestor_path(PROJECT_ID, BRANCH, "http://example.org/Root")
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# _pick_preferred_label
+# ---------------------------------------------------------------------------
+
+
+class TestPickPreferredLabel:
+    def test_returns_matching_label(self) -> None:
+        """Picks the label matching the preference."""
+        from rdflib.namespace import RDFS
+
+        label = MagicMock()
+        label.property_iri = str(RDFS.label)
+        label.value = "Person"
+        label.lang = "en"
+
+        result = OntologyIndexService._pick_preferred_label([label], ["rdfs:label@en"])
+        assert result == "Person"
+
+    def test_returns_none_when_empty(self) -> None:
+        """Returns None when no labels are available."""
+        result = OntologyIndexService._pick_preferred_label([], ["rdfs:label@en"])
+        assert result is None
+
+    def test_falls_back_to_rdfs_label(self) -> None:
+        """Falls back to any rdfs:label when no preference matches."""
+        from rdflib.namespace import RDFS
+
+        label = MagicMock()
+        label.property_iri = str(RDFS.label)
+        label.value = "Persona"
+        label.lang = "es"
+
+        result = OntologyIndexService._pick_preferred_label([label], ["rdfs:label@fr"])
+        assert result == "Persona"

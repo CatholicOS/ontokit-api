@@ -439,3 +439,140 @@ class TestToResponse:
         assert response.responder is not None
         assert response.responder.id == ADMIN_ID
         assert response.responder.name == "Admin User"
+
+
+# ---------------------------------------------------------------------------
+# get_pending_summary
+# ---------------------------------------------------------------------------
+
+
+class TestGetPendingSummary:
+    @pytest.mark.asyncio
+    async def test_pending_summary_returns_counts(
+        self, service: JoinRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Returns pending request counts grouped by project."""
+        row = MagicMock()
+        row.project_id = PROJECT_ID
+        row.project_name = "Test Project"
+        row.pending_count = 3
+
+        mock_result = MagicMock()
+        mock_result.all.return_value = [row]
+        mock_db.execute.return_value = mock_result
+
+        user = _make_user(user_id=OWNER_ID)
+        result = await service.get_pending_summary(user)
+        assert result.total_pending == 3
+        assert len(result.by_project) == 1
+        assert result.by_project[0].pending_count == 3
+
+    @pytest.mark.asyncio
+    async def test_pending_summary_empty(
+        self, service: JoinRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Returns zero when no pending requests exist."""
+        mock_result = MagicMock()
+        mock_result.all.return_value = []
+        mock_db.execute.return_value = mock_result
+
+        user = _make_user(user_id=OWNER_ID)
+        result = await service.get_pending_summary(user)
+        assert result.total_pending == 0
+        assert result.by_project == []
+
+    @pytest.mark.asyncio
+    async def test_pending_summary_superadmin_sees_all(
+        self, service: JoinRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Superadmin sees pending requests across all public projects."""
+        row1 = MagicMock()
+        row1.project_id = PROJECT_ID
+        row1.project_name = "Project A"
+        row1.pending_count = 2
+        row2 = MagicMock()
+        row2.project_id = uuid.uuid4()
+        row2.project_name = "Project B"
+        row2.pending_count = 1
+
+        mock_result = MagicMock()
+        mock_result.all.return_value = [row1, row2]
+        mock_db.execute.return_value = mock_result
+
+        superadmin = CurrentUser(
+            id="superadmin-id",
+            email="admin@example.com",
+            name="Super Admin",
+            username="superadmin",
+            roles=[],
+        )
+        result = await service.get_pending_summary(superadmin)
+        assert result.total_pending == 3
+        assert len(result.by_project) == 2
+
+
+# ---------------------------------------------------------------------------
+# withdraw_request — additional edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestWithdrawRequestEdgeCases:
+    @pytest.mark.asyncio
+    async def test_withdraw_not_found(
+        self, service: JoinRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Withdrawing a non-existent request raises 404."""
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute.return_value = mock_result
+
+        user = _make_user(user_id=REQUESTER_ID)
+        with pytest.raises(HTTPException) as exc_info:
+            await service.withdraw_request(PROJECT_ID, uuid.uuid4(), user)
+        assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_withdraw_already_approved(
+        self, service: JoinRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Withdrawing an already-approved request raises 400."""
+        jr = _make_join_request(status=JoinRequestStatus.APPROVED, user_id=REQUESTER_ID)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = jr
+        mock_db.execute.return_value = mock_result
+
+        user = _make_user(user_id=REQUESTER_ID)
+        with pytest.raises(HTTPException) as exc_info:
+            await service.withdraw_request(PROJECT_ID, REQUEST_ID, user)
+        assert exc_info.value.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# get_my_request — additional statuses
+# ---------------------------------------------------------------------------
+
+
+class TestGetMyRequestAdditional:
+    @pytest.mark.asyncio
+    async def test_returns_most_recent_non_pending(
+        self, service: JoinRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Returns most recent non-pending request when no pending exists."""
+        declined_jr = _make_join_request(status=JoinRequestStatus.DECLINED, user_id=REQUESTER_ID)
+        declined_jr.responded_by = ADMIN_ID
+        declined_jr.responded_at = datetime.now(UTC)
+
+        # First execute: pending check — returns None
+        mock_pending_result = MagicMock()
+        mock_pending_result.scalar_one_or_none.return_value = None
+        # Second execute: most recent — returns declined
+        mock_recent_result = MagicMock()
+        mock_recent_result.scalar_one_or_none.return_value = declined_jr
+
+        mock_db.execute.side_effect = [mock_pending_result, mock_recent_result]
+
+        user = _make_user(user_id=REQUESTER_ID)
+        result = await service.get_my_request(PROJECT_ID, user)
+        assert result.has_pending_request is False
+        assert result.request is not None
+        assert result.request.status == JoinRequestStatus.DECLINED

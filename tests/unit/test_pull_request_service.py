@@ -1144,3 +1144,583 @@ class TestGetPRCommits:
         result = await service.get_pr_commits(PROJECT_ID, 1, user)
         assert result.total == 0
         assert result.items == []
+
+
+# ---------------------------------------------------------------------------
+# _to_pr_response
+# ---------------------------------------------------------------------------
+
+
+class TestToPrResponse:
+    @pytest.mark.asyncio
+    async def test_to_pr_response_basic(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+        mock_git_service: MagicMock,
+    ) -> None:
+        """_to_pr_response converts a PR ORM model to a PRResponse schema."""
+        project = _make_project(pr_approval_required=0)
+        pr = _make_pr()
+
+        mock_git_service.get_commits_between.return_value = []
+
+        project_result = MagicMock()
+        project_result.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = project_result
+
+        result = await service._to_pr_response(pr, PROJECT_ID)
+        assert result.pr_number == 1
+        assert result.title == "Test PR"
+        assert result.source_branch == "feature"
+        assert result.target_branch == "main"
+        assert result.review_count == 0
+        assert result.approval_count == 0
+        assert result.can_merge is True  # 0 approvals required, 0 approvals
+
+    @pytest.mark.asyncio
+    async def test_to_pr_response_with_reviews(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+        mock_git_service: MagicMock,
+    ) -> None:
+        """_to_pr_response counts reviews and approvals correctly."""
+        project = _make_project(pr_approval_required=1)
+        review = _make_review(review_status="approved")
+        pr = _make_pr(reviews=[review])
+
+        mock_git_service.get_commits_between.return_value = []
+
+        project_result = MagicMock()
+        project_result.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = project_result
+
+        result = await service._to_pr_response(pr, PROJECT_ID)
+        assert result.review_count == 1
+        assert result.approval_count == 1
+        assert result.can_merge is True
+
+    @pytest.mark.asyncio
+    async def test_to_pr_response_closed_cannot_merge(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+        mock_git_service: MagicMock,
+    ) -> None:
+        """A closed PR cannot be merged even with approvals."""
+        project = _make_project(pr_approval_required=0)
+        pr = _make_pr(status="closed")
+
+        mock_git_service.get_commits_between.return_value = []
+
+        project_result = MagicMock()
+        project_result.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = project_result
+
+        result = await service._to_pr_response(pr, PROJECT_ID)
+        assert result.can_merge is False
+
+    @pytest.mark.asyncio
+    async def test_to_pr_response_author_lookup_when_name_missing(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+        mock_git_service: MagicMock,
+        mock_user_service: MagicMock,
+    ) -> None:
+        """When author_name is missing, user_service is queried."""
+        project = _make_project()
+        pr = _make_pr()
+        pr.author_name = None
+        pr.author_email = None
+
+        mock_user_service.get_user_info = AsyncMock(
+            return_value={"name": "Looked Up", "email": "looked@up.com"}
+        )
+        mock_git_service.get_commits_between.return_value = []
+
+        project_result = MagicMock()
+        project_result.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = project_result
+
+        result = await service._to_pr_response(pr, PROJECT_ID)
+        assert result.author is not None
+        assert result.author.name == "Looked Up"
+        assert result.author.email == "looked@up.com"
+
+
+# ---------------------------------------------------------------------------
+# get_pr_diff (additional cases)
+# ---------------------------------------------------------------------------
+
+
+class TestGetPRDiffExtended:
+    @pytest.mark.asyncio
+    async def test_get_diff_merged_pr_uses_commit_hashes(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+        mock_git_service: MagicMock,
+    ) -> None:
+        """A merged PR with stored hashes uses those for diff, not branch names."""
+        project = _make_project()
+        pr = _make_pr(
+            status="merged",
+            base_commit_hash="aaa111",
+            head_commit_hash="bbb222",
+        )
+        user = _make_user(EDITOR_ID)
+
+        diff_info = MagicMock()
+        diff_info.changes = []
+        diff_info.total_additions = 0
+        diff_info.total_deletions = 0
+        diff_info.files_changed = 0
+        mock_git_service.diff_versions.return_value = diff_info
+
+        project_result = MagicMock()
+        project_result.scalar_one_or_none.return_value = project
+        pr_result = MagicMock()
+        pr_result.scalar_one_or_none.return_value = pr
+        mock_db.execute.side_effect = [project_result, pr_result]
+
+        result = await service.get_pr_diff(PROJECT_ID, 1, user)
+        assert result.files_changed == 0
+        mock_git_service.diff_versions.assert_called_once_with(PROJECT_ID, "aaa111", "bbb222")
+
+    @pytest.mark.asyncio
+    async def test_get_diff_open_pr_error_raises_400(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+        mock_git_service: MagicMock,
+    ) -> None:
+        """An open PR whose diff raises ValueError returns 400."""
+        project = _make_project()
+        pr = _make_pr(status="open")
+        user = _make_user(EDITOR_ID)
+
+        mock_git_service.diff_versions.side_effect = ValueError("cannot diff")
+
+        project_result = MagicMock()
+        project_result.scalar_one_or_none.return_value = project
+        pr_result = MagicMock()
+        pr_result.scalar_one_or_none.return_value = pr
+        mock_db.execute.side_effect = [project_result, pr_result]
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.get_pr_diff(PROJECT_ID, 1, user)
+        assert exc_info.value.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# get_open_pr_summary
+# ---------------------------------------------------------------------------
+
+
+class TestGetOpenPRSummary:
+    @pytest.mark.asyncio
+    async def test_summary_superadmin(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Superadmin gets summary across all projects."""
+        user = _make_user(OWNER_ID)
+        user = CurrentUser(
+            id=OWNER_ID,
+            email="admin@example.com",
+            name="Admin",
+            username="admin",
+            roles=["superadmin"],
+        )
+
+        mock_result = MagicMock()
+        mock_result.all.return_value = []
+        mock_db.execute.return_value = mock_result
+
+        result = await service.get_open_pr_summary(user)
+        assert result.total_open == 0
+        assert result.by_project == []
+
+    @pytest.mark.asyncio
+    async def test_summary_regular_user(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Regular user gets summary only for projects they manage."""
+        user = _make_user(OWNER_ID)
+
+        mock_result = MagicMock()
+        mock_result.all.return_value = []
+        mock_db.execute.return_value = mock_result
+
+        result = await service.get_open_pr_summary(user)
+        assert result.total_open == 0
+
+
+# ---------------------------------------------------------------------------
+# handle_github_pr_webhook
+# ---------------------------------------------------------------------------
+
+
+class TestHandleGitHubPRWebhook:
+    @pytest.mark.asyncio
+    async def test_webhook_no_integration_returns_early(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """When no GitHub integration exists, webhook handler returns early."""
+        gh_result = MagicMock()
+        gh_result.scalar_one_or_none.return_value = None
+        mock_db.execute.return_value = gh_result
+
+        # Should not raise
+        await service.handle_github_pr_webhook(PROJECT_ID, "opened", {"number": 1, "title": "Test"})
+
+    @pytest.mark.asyncio
+    async def test_webhook_closed_merged(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Webhook with action=closed and merged=true sets PR to merged."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+
+        pr = _make_pr(github_pr_number=42)
+
+        gh_result = MagicMock()
+        gh_result.scalar_one_or_none.return_value = integration
+        pr_result = MagicMock()
+        pr_result.scalar_one_or_none.return_value = pr
+
+        mock_db.execute.side_effect = [gh_result, pr_result]
+
+        await service.handle_github_pr_webhook(PROJECT_ID, "closed", {"number": 42, "merged": True})
+        assert pr.status == "merged"
+        mock_db.commit.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_webhook_closed_not_merged(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Webhook with action=closed and merged=false sets PR to closed."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+
+        pr = _make_pr(github_pr_number=42)
+
+        gh_result = MagicMock()
+        gh_result.scalar_one_or_none.return_value = integration
+        pr_result = MagicMock()
+        pr_result.scalar_one_or_none.return_value = pr
+
+        mock_db.execute.side_effect = [gh_result, pr_result]
+
+        await service.handle_github_pr_webhook(
+            PROJECT_ID, "closed", {"number": 42, "merged": False}
+        )
+        assert pr.status == "closed"
+
+    @pytest.mark.asyncio
+    async def test_webhook_reopened(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Webhook with action=reopened sets PR back to open."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+
+        pr = _make_pr(status="closed", github_pr_number=42)
+
+        gh_result = MagicMock()
+        gh_result.scalar_one_or_none.return_value = integration
+        pr_result = MagicMock()
+        pr_result.scalar_one_or_none.return_value = pr
+
+        mock_db.execute.side_effect = [gh_result, pr_result]
+
+        await service.handle_github_pr_webhook(PROJECT_ID, "reopened", {"number": 42})
+        assert pr.status == "open"
+
+    @pytest.mark.asyncio
+    async def test_webhook_edited(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Webhook with action=edited updates title and description."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+
+        pr = _make_pr(github_pr_number=42)
+
+        gh_result = MagicMock()
+        gh_result.scalar_one_or_none.return_value = integration
+        pr_result = MagicMock()
+        pr_result.scalar_one_or_none.return_value = pr
+
+        mock_db.execute.side_effect = [gh_result, pr_result]
+
+        await service.handle_github_pr_webhook(
+            PROJECT_ID,
+            "edited",
+            {"number": 42, "title": "New Title", "body": "New Body"},
+        )
+        assert pr.title == "New Title"
+        assert pr.description == "New Body"
+
+
+# ---------------------------------------------------------------------------
+# handle_github_push_webhook
+# ---------------------------------------------------------------------------
+
+
+class TestHandleGitHubPushWebhook:
+    @pytest.mark.asyncio
+    async def test_push_no_integration_returns_early(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """When no GitHub integration exists, push webhook does nothing."""
+        gh_result = MagicMock()
+        gh_result.scalar_one_or_none.return_value = None
+        mock_db.execute.return_value = gh_result
+
+        await service.handle_github_push_webhook(PROJECT_ID, "refs/heads/main", [])
+
+    @pytest.mark.asyncio
+    async def test_push_wrong_branch_returns_early(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Push to a non-default branch does nothing."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+        integration.default_branch = "main"
+
+        gh_result = MagicMock()
+        gh_result.scalar_one_or_none.return_value = integration
+        mock_db.execute.return_value = gh_result
+
+        await service.handle_github_push_webhook(PROJECT_ID, "refs/heads/feature", [])
+        mock_db.commit.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# _sync_merge_commits_to_prs
+# ---------------------------------------------------------------------------
+
+
+class TestSyncMergeCommitsToPrs:
+    @pytest.mark.asyncio
+    async def test_sync_no_history_does_nothing(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+        mock_git_service: MagicMock,
+    ) -> None:
+        """When git history is empty, no PRs are created."""
+        mock_git_service.get_history.return_value = []
+
+        merged_result = MagicMock()
+        merged_result.scalars.return_value.all.return_value = []
+        max_result = MagicMock()
+        max_result.scalar.return_value = 0
+
+        mock_db.execute.side_effect = [merged_result, max_result]
+
+        await service._sync_merge_commits_to_prs(PROJECT_ID)
+        # No commit because nothing was created/updated
+        mock_db.commit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_sync_history_exception_returns_early(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,  # noqa: ARG002
+        mock_git_service: MagicMock,
+    ) -> None:
+        """When get_history raises, sync returns without error."""
+        mock_git_service.get_history.side_effect = Exception("git error")
+
+        # Should not raise
+        await service._sync_merge_commits_to_prs(PROJECT_ID)
+
+
+# ---------------------------------------------------------------------------
+# get_github_integration / create_github_integration / update_github_integration
+# ---------------------------------------------------------------------------
+
+
+class TestGitHubIntegration:
+    @pytest.mark.asyncio
+    async def test_get_github_integration_not_admin(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Non-admin users cannot view GitHub integration."""
+        project = _make_project()
+        user = _make_user(VIEWER_ID)
+
+        _setup_project_lookup(mock_db, project)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.get_github_integration(PROJECT_ID, user)
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_get_github_integration_admin_none(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Admin viewing a project with no GitHub integration returns None."""
+        project = _make_project()
+        user = _make_user(OWNER_ID)
+
+        project_result = MagicMock()
+        project_result.scalar_one_or_none.return_value = project
+        gh_result = MagicMock()
+        gh_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [project_result, gh_result]
+
+        result = await service.get_github_integration(PROJECT_ID, user)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_create_github_integration_non_owner(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Only the owner can create GitHub integration."""
+        project = _make_project()
+        user = _make_user(EDITOR_ID)
+
+        _setup_project_lookup(mock_db, project)
+
+        from ontokit.schemas.pull_request import GitHubIntegrationCreate
+
+        create_data = GitHubIntegrationCreate(repo_owner="org", repo_name="repo")
+        with pytest.raises(HTTPException) as exc_info:
+            await service.create_github_integration(PROJECT_ID, create_data, user)
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_update_github_integration_not_found(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Updating a nonexistent integration raises 404."""
+        project = _make_project()
+        user = _make_user(OWNER_ID)
+
+        project_result = MagicMock()
+        project_result.scalar_one_or_none.return_value = project
+        gh_result = MagicMock()
+        gh_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [project_result, gh_result]
+
+        from ontokit.schemas.pull_request import GitHubIntegrationUpdate
+
+        update_data = GitHubIntegrationUpdate(default_branch="develop")
+        with pytest.raises(HTTPException) as exc_info:
+            await service.update_github_integration(PROJECT_ID, update_data, user)
+        assert exc_info.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# get_pr_settings / update_pr_settings
+# ---------------------------------------------------------------------------
+
+
+class TestPRSettings:
+    @pytest.mark.asyncio
+    async def test_get_pr_settings_forbidden_for_editor(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Editors cannot view PR settings."""
+        project = _make_project()
+        user = _make_user(EDITOR_ID)
+
+        _setup_project_lookup(mock_db, project)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.get_pr_settings(PROJECT_ID, user)
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_get_pr_settings_admin_success(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Admins can view PR settings."""
+        project = _make_project(pr_approval_required=2)
+        user = _make_user(OWNER_ID)
+
+        project_result = MagicMock()
+        project_result.scalar_one_or_none.return_value = project
+        gh_result = MagicMock()
+        gh_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [project_result, gh_result]
+
+        result = await service.get_pr_settings(PROJECT_ID, user)
+        assert result.pr_approval_required == 2
+        assert result.github_integration is None
+
+    @pytest.mark.asyncio
+    async def test_update_pr_settings_non_owner_forbidden(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Only the owner can update PR settings."""
+        project = _make_project()
+        user = _make_user(EDITOR_ID)
+
+        _setup_project_lookup(mock_db, project)
+
+        from ontokit.schemas.pull_request import PRSettingsUpdate
+
+        update_data = PRSettingsUpdate(pr_approval_required=1)
+        with pytest.raises(HTTPException) as exc_info:
+            await service.update_pr_settings(PROJECT_ID, update_data, user)
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_update_pr_settings_success(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Owner can update PR settings."""
+        project = _make_project()
+        user = _make_user(OWNER_ID)
+
+        project_result = MagicMock()
+        project_result.scalar_one_or_none.return_value = project
+        gh_result = MagicMock()
+        gh_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [project_result, gh_result]
+
+        from ontokit.schemas.pull_request import PRSettingsUpdate
+
+        update_data = PRSettingsUpdate(pr_approval_required=3)
+        result = await service.update_pr_settings(PROJECT_ID, update_data, user)
+        assert result.pr_approval_required == 3
+        mock_db.commit.assert_awaited()

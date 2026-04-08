@@ -316,3 +316,209 @@ class TestClassToResponse:
         )
         comment_values = [c.value for c in response.comments]
         assert "A human being" in comment_values
+
+    @pytest.mark.asyncio
+    async def test_class_response_has_parent_info(self, loaded_service: OntologyService) -> None:
+        """_class_to_response includes parent_iris and parent_labels for subclasses."""
+        from rdflib import Literal as RDFLiteral
+        from rdflib.namespace import OWL, RDF, RDFS
+
+        g = Graph()
+        parent = URIRef("http://example.org/ontology#Animal")
+        child = URIRef("http://example.org/ontology#Dog")
+        g.add((parent, RDF.type, OWL.Class))
+        g.add((parent, RDFS.label, RDFLiteral("Animal", lang="en")))
+        g.add((child, RDF.type, OWL.Class))
+        g.add((child, RDFS.label, RDFLiteral("Dog", lang="en")))
+        g.add((child, RDFS.subClassOf, parent))
+
+        loaded_service.set_graph(PROJECT_ID, BRANCH, g)
+        response = await loaded_service._class_to_response(g, child)
+        assert str(parent) in response.parent_iris
+        assert response.parent_labels[str(parent)] == "Animal"
+
+    @pytest.mark.asyncio
+    async def test_class_response_child_count(self, loaded_service: OntologyService) -> None:
+        """_class_to_response counts direct children."""
+        from rdflib.namespace import OWL, RDF, RDFS
+
+        g = Graph()
+        parent = URIRef("http://example.org/ontology#Animal")
+        child1 = URIRef("http://example.org/ontology#Dog")
+        child2 = URIRef("http://example.org/ontology#Cat")
+        g.add((parent, RDF.type, OWL.Class))
+        g.add((child1, RDF.type, OWL.Class))
+        g.add((child2, RDF.type, OWL.Class))
+        g.add((child1, RDFS.subClassOf, parent))
+        g.add((child2, RDFS.subClassOf, parent))
+
+        loaded_service.set_graph(PROJECT_ID, BRANCH, g)
+        response = await loaded_service._class_to_response(g, parent)
+        assert response.child_count == 2
+
+    @pytest.mark.asyncio
+    async def test_class_response_annotations(self, loaded_service: OntologyService) -> None:
+        """_class_to_response extracts annotation properties (SKOS, DC)."""
+        from rdflib import Literal as RDFLiteral
+        from rdflib.namespace import OWL, RDF, RDFS, SKOS
+
+        g = Graph()
+        cls = URIRef("http://example.org/ontology#Person")
+        g.add((cls, RDF.type, OWL.Class))
+        g.add((cls, RDFS.label, RDFLiteral("Person", lang="en")))
+        g.add((cls, SKOS.definition, RDFLiteral("A human being", lang="en")))
+
+        loaded_service.set_graph(PROJECT_ID, BRANCH, g)
+        response = await loaded_service._class_to_response(g, cls)
+        annotation_labels = [a.property_label for a in response.annotations]
+        assert "skos:definition" in annotation_labels
+
+    @pytest.mark.asyncio
+    async def test_class_response_deprecated_flag(self, loaded_service: OntologyService) -> None:
+        """_class_to_response detects owl:deprecated annotation."""
+        from rdflib import Literal as RDFLiteral
+        from rdflib.namespace import OWL, RDF, XSD
+
+        g = Graph()
+        cls = URIRef("http://example.org/ontology#OldClass")
+        g.add((cls, RDF.type, OWL.Class))
+        g.add((cls, OWL.deprecated, RDFLiteral("true", datatype=XSD.boolean)))
+
+        loaded_service.set_graph(PROJECT_ID, BRANCH, g)
+        response = await loaded_service._class_to_response(g, cls)
+        assert response.deprecated is True
+
+
+# ---------------------------------------------------------------------------
+# serialize
+# ---------------------------------------------------------------------------
+
+
+class TestSerialize:
+    @pytest.mark.asyncio
+    async def test_serialize_turtle(self, loaded_service: OntologyService) -> None:
+        """serialize returns Turtle serialization."""
+        result = await loaded_service.serialize(PROJECT_ID, format="turtle", branch=BRANCH)
+        assert isinstance(result, str)
+        assert "Person" in result
+
+    @pytest.mark.asyncio
+    async def test_serialize_xml(self, loaded_service: OntologyService) -> None:
+        """serialize returns RDF/XML serialization."""
+        result = await loaded_service.serialize(PROJECT_ID, format="xml", branch=BRANCH)
+        assert isinstance(result, str)
+        assert "rdf:RDF" in result or "RDF" in result
+
+
+# ---------------------------------------------------------------------------
+# get_root_tree_nodes / get_children_tree_nodes
+# ---------------------------------------------------------------------------
+
+
+class TestTreeNodes:
+    @pytest.mark.asyncio
+    async def test_get_root_tree_nodes(self, loaded_service: OntologyService) -> None:
+        """get_root_tree_nodes returns tree nodes for root classes."""
+        nodes = await loaded_service.get_root_tree_nodes(PROJECT_ID, branch=BRANCH)
+        assert len(nodes) >= 2
+        labels = [n.label for n in nodes]
+        assert "Person" in labels
+        assert "Organization" in labels
+
+    @pytest.mark.asyncio
+    async def test_get_children_tree_nodes_empty(self, loaded_service: OntologyService) -> None:
+        """get_children_tree_nodes returns empty for leaf class."""
+        nodes = await loaded_service.get_children_tree_nodes(
+            PROJECT_ID, "http://example.org/ontology#Person", branch=BRANCH
+        )
+        assert nodes == []
+
+    @pytest.mark.asyncio
+    async def test_get_children_tree_nodes_with_children(self) -> None:
+        """get_children_tree_nodes returns children with correct labels."""
+        from rdflib import Literal as RDFLiteral
+        from rdflib.namespace import OWL, RDF, RDFS
+
+        g = Graph()
+        parent = URIRef("http://example.org/ontology#Animal")
+        child = URIRef("http://example.org/ontology#Dog")
+        g.add((parent, RDF.type, OWL.Class))
+        g.add((parent, RDFS.label, RDFLiteral("Animal", lang="en")))
+        g.add((child, RDF.type, OWL.Class))
+        g.add((child, RDFS.label, RDFLiteral("Dog", lang="en")))
+        g.add((child, RDFS.subClassOf, parent))
+
+        svc = OntologyService(storage=None)
+        svc.set_graph(PROJECT_ID, BRANCH, g)
+        nodes = await svc.get_children_tree_nodes(PROJECT_ID, str(parent), branch=BRANCH)
+        assert len(nodes) == 1
+        assert nodes[0].label == "Dog"
+
+
+# ---------------------------------------------------------------------------
+# get_ancestor_path
+# ---------------------------------------------------------------------------
+
+
+class TestGetAncestorPath:
+    @pytest.mark.asyncio
+    async def test_ancestor_path_root_class(self, loaded_service: OntologyService) -> None:
+        """Root class returns empty ancestor path."""
+        path = await loaded_service.get_ancestor_path(
+            PROJECT_ID, "http://example.org/ontology#Person", branch=BRANCH
+        )
+        assert path == []
+
+    @pytest.mark.asyncio
+    async def test_ancestor_path_nonexistent_class(self, loaded_service: OntologyService) -> None:
+        """Non-existent class returns empty path."""
+        path = await loaded_service.get_ancestor_path(
+            PROJECT_ID, "http://example.org/ontology#NonExistent", branch=BRANCH
+        )
+        assert path == []
+
+    @pytest.mark.asyncio
+    async def test_ancestor_path_with_hierarchy(self) -> None:
+        """Returns path from root to parent of target."""
+        from rdflib import Literal as RDFLiteral
+        from rdflib.namespace import OWL, RDF, RDFS
+
+        g = Graph()
+        root = URIRef("http://example.org/ontology#Entity")
+        mid = URIRef("http://example.org/ontology#Animal")
+        leaf = URIRef("http://example.org/ontology#Dog")
+        for cls in [root, mid, leaf]:
+            g.add((cls, RDF.type, OWL.Class))
+            local = str(cls).split("#")[-1]
+            g.add((cls, RDFS.label, RDFLiteral(local, lang="en")))
+        g.add((mid, RDFS.subClassOf, root))
+        g.add((leaf, RDFS.subClassOf, mid))
+
+        svc = OntologyService(storage=None)
+        svc.set_graph(PROJECT_ID, BRANCH, g)
+        path = await svc.get_ancestor_path(PROJECT_ID, str(leaf), branch=BRANCH)
+        path_iris = [n.iri for n in path]
+        assert str(root) in path_iris
+        assert str(mid) in path_iris
+        assert str(leaf) not in path_iris
+
+
+# ---------------------------------------------------------------------------
+# search_entities with entity type filter
+# ---------------------------------------------------------------------------
+
+
+class TestSearchEntitiesExtended:
+    @pytest.mark.asyncio
+    async def test_search_filter_properties_only(self, loaded_service: OntologyService) -> None:
+        """Filtering by 'property' returns only properties."""
+        result = await loaded_service.search_entities(PROJECT_ID, "*", entity_types=["property"])
+        for r in result.results:
+            assert r.entity_type == "property"
+        assert result.total >= 2  # worksFor, hasName
+
+    @pytest.mark.asyncio
+    async def test_search_with_limit(self, loaded_service: OntologyService) -> None:
+        """Limit restricts number of returned results."""
+        result = await loaded_service.search_entities(PROJECT_ID, "*", limit=1)
+        assert len(result.results) <= 1

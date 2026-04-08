@@ -6,6 +6,7 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
+from arq.jobs import JobStatus
 from fastapi import HTTPException
 from pydantic import ValidationError
 
@@ -291,3 +292,200 @@ class TestGetHistory:
             result = await service.get_history(PROJECT_ID, limit=10, user=_make_user())
             assert result.total == 0
             assert result.items == []
+
+    @pytest.mark.asyncio
+    async def test_history_with_events(
+        self,
+        service: RemoteSyncService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Returns history with events when they exist."""
+        with patch("ontokit.services.remote_sync_service.get_project_service") as mock_factory:
+            mock_ps = MagicMock()
+            mock_ps.get = AsyncMock(return_value=_make_project_response("owner"))
+            mock_factory.return_value = mock_ps
+
+            mock_count_result = MagicMock()
+            mock_count_result.scalar.return_value = 2
+
+            from datetime import UTC, datetime
+
+            event1 = MagicMock()
+            event1.id = uuid.uuid4()
+            event1.project_id = PROJECT_ID
+            event1.config_id = uuid.uuid4()
+            event1.event_type = "check_no_changes"
+            event1.remote_commit_sha = "abc123"
+            event1.pr_id = None
+            event1.changes_summary = None
+            event1.error_message = None
+            event1.created_at = datetime.now(UTC)
+
+            mock_events_result = MagicMock()
+            mock_events_result.scalars.return_value.all.return_value = [event1]
+
+            mock_db.execute.side_effect = [mock_count_result, mock_events_result]
+
+            result = await service.get_history(PROJECT_ID, limit=10, user=_make_user())
+            assert result.total == 2
+            assert len(result.items) == 1
+
+
+# ---------------------------------------------------------------------------
+# trigger_check — success path
+# ---------------------------------------------------------------------------
+
+
+class TestTriggerCheckSuccess:
+    @pytest.mark.asyncio
+    async def test_trigger_check_success(
+        self,
+        service: RemoteSyncService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Triggering a check with valid config enqueues a job."""
+        config = _make_sync_config(status="idle")
+
+        with (
+            patch("ontokit.services.remote_sync_service.get_project_service") as mock_factory,
+            patch("ontokit.services.remote_sync_service.get_arq_pool") as mock_pool_fn,
+        ):
+            mock_ps = MagicMock()
+            mock_ps.get = AsyncMock(return_value=_make_project_response("owner"))
+            mock_factory.return_value = mock_ps
+
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = config
+            mock_db.execute.return_value = mock_result
+
+            mock_pool = AsyncMock()
+            mock_pool.enqueue_job = AsyncMock(return_value=Mock(job_id="check-job-1"))
+            mock_pool_fn.return_value = mock_pool
+
+            result = await service.trigger_check(PROJECT_ID, _make_user())
+            assert result.job_id == "check-job-1"
+            assert result.status == "queued"
+            assert config.status == "checking"
+
+    @pytest.mark.asyncio
+    async def test_trigger_check_enqueue_returns_none(
+        self,
+        service: RemoteSyncService,
+        mock_db: AsyncMock,
+    ) -> None:
+        """Triggering a check when enqueue returns None raises 500."""
+        config = _make_sync_config(status="idle")
+
+        with (
+            patch("ontokit.services.remote_sync_service.get_project_service") as mock_factory,
+            patch("ontokit.services.remote_sync_service.get_arq_pool") as mock_pool_fn,
+        ):
+            mock_ps = MagicMock()
+            mock_ps.get = AsyncMock(return_value=_make_project_response("owner"))
+            mock_factory.return_value = mock_ps
+
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = config
+            mock_db.execute.return_value = mock_result
+
+            mock_pool = AsyncMock()
+            mock_pool.enqueue_job = AsyncMock(return_value=None)
+            mock_pool_fn.return_value = mock_pool
+
+            with pytest.raises(HTTPException) as exc_info:
+                await service.trigger_check(PROJECT_ID, _make_user())
+            assert exc_info.value.status_code == 500
+            assert config.status == "error"
+
+
+# ---------------------------------------------------------------------------
+# get_job_status
+# ---------------------------------------------------------------------------
+
+
+class TestGetJobStatus:
+    @pytest.mark.asyncio
+    async def test_get_job_status_complete(
+        self,
+        service: RemoteSyncService,
+        mock_db: AsyncMock,  # noqa: ARG002
+    ) -> None:
+        """Returns complete status for a finished job."""
+        with (
+            patch("ontokit.services.remote_sync_service.get_project_service") as mock_factory,
+            patch("ontokit.services.remote_sync_service.get_arq_pool") as mock_pool_fn,
+            patch("ontokit.services.remote_sync_service.Job") as mock_job_cls,
+        ):
+            mock_ps = MagicMock()
+            mock_ps.get = AsyncMock(return_value=_make_project_response("owner"))
+            mock_factory.return_value = mock_ps
+
+            mock_pool_fn.return_value = AsyncMock()
+
+            mock_job = MagicMock()
+            mock_job.status = AsyncMock(return_value=JobStatus.complete)
+            mock_info = MagicMock()
+            mock_info.success = True
+            mock_info.result = {"changes_detected": False}
+            mock_job.result_info = AsyncMock(return_value=mock_info)
+            mock_job_cls.return_value = mock_job
+
+            result = await service.get_job_status(PROJECT_ID, "job-1", _make_user())
+            assert result.status == "complete"
+            assert result.result == {"changes_detected": False}
+            assert result.error is None
+
+    @pytest.mark.asyncio
+    async def test_get_job_status_not_found(
+        self,
+        service: RemoteSyncService,
+        mock_db: AsyncMock,  # noqa: ARG002
+    ) -> None:
+        """Returns not_found when job status lookup raises."""
+        with (
+            patch("ontokit.services.remote_sync_service.get_project_service") as mock_factory,
+            patch("ontokit.services.remote_sync_service.get_arq_pool") as mock_pool_fn,
+            patch("ontokit.services.remote_sync_service.Job") as mock_job_cls,
+        ):
+            mock_ps = MagicMock()
+            mock_ps.get = AsyncMock(return_value=_make_project_response("owner"))
+            mock_factory.return_value = mock_ps
+
+            mock_pool_fn.return_value = AsyncMock()
+
+            mock_job = MagicMock()
+            mock_job.status = AsyncMock(side_effect=RuntimeError("gone"))
+            mock_job_cls.return_value = mock_job
+
+            result = await service.get_job_status(PROJECT_ID, "bad-job", _make_user())
+            assert result.status == "not_found"
+
+    @pytest.mark.asyncio
+    async def test_get_job_status_failed(
+        self,
+        service: RemoteSyncService,
+        mock_db: AsyncMock,  # noqa: ARG002
+    ) -> None:
+        """Returns failed status when job completed but was unsuccessful."""
+        with (
+            patch("ontokit.services.remote_sync_service.get_project_service") as mock_factory,
+            patch("ontokit.services.remote_sync_service.get_arq_pool") as mock_pool_fn,
+            patch("ontokit.services.remote_sync_service.Job") as mock_job_cls,
+        ):
+            mock_ps = MagicMock()
+            mock_ps.get = AsyncMock(return_value=_make_project_response("owner"))
+            mock_factory.return_value = mock_ps
+
+            mock_pool_fn.return_value = AsyncMock()
+
+            mock_job = MagicMock()
+            mock_job.status = AsyncMock(return_value=JobStatus.complete)
+            mock_info = MagicMock()
+            mock_info.success = False
+            mock_info.result = "Connection refused"
+            mock_job.result_info = AsyncMock(return_value=mock_info)
+            mock_job_cls.return_value = mock_job
+
+            result = await service.get_job_status(PROJECT_ID, "fail-job", _make_user())
+            assert result.status == "failed"
+            assert result.error == "Connection refused"
