@@ -619,6 +619,9 @@ class TestEmbedProject:
             await service.embed_project(PROJECT_ID, BRANCH, job_id)
 
         mock_db.rollback.assert_awaited_once()
+        # Third execute call is the raw UPDATE setting status='failed'
+        assert mock_db.execute.call_count == 3
+        mock_db.commit.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_embed_project_updates_existing_embedding(

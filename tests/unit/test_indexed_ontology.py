@@ -65,7 +65,9 @@ class TestShouldUseIndex:
     @pytest.mark.asyncio
     async def test_returns_false_on_exception(self, service: IndexedOntologyService) -> None:
         """Returns False when the index check raises an exception (e.g., table missing)."""
-        service.index.is_index_ready = AsyncMock(side_effect=Exception("table not found"))  # type: ignore[method-assign]
+        service.index.is_index_ready = AsyncMock(  # type: ignore[method-assign]
+            side_effect=Exception("table not found")
+        )
         result = await service._should_use_index(PROJECT_ID, BRANCH)
         assert result is False
 
@@ -114,7 +116,9 @@ class TestGetRootTreeNodesFallback:
     ) -> None:
         """Falls back to RDFLib when the index query raises an exception."""
         service.index.is_index_ready = AsyncMock(return_value=True)  # type: ignore[method-assign]
-        service.index.get_root_classes = AsyncMock(side_effect=RuntimeError("query failed"))  # type: ignore[method-assign]
+        service.index.get_root_classes = AsyncMock(  # type: ignore[method-assign]
+            side_effect=RuntimeError("query failed")
+        )
         service._enqueue_reindex_if_stale = AsyncMock()  # type: ignore[method-assign]
 
         await service.get_root_tree_nodes(PROJECT_ID, branch=BRANCH)

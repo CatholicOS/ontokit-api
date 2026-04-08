@@ -1768,14 +1768,8 @@ class TestTransferOwnershipEdgeCases:
         mock_no_token = MagicMock()
         mock_no_token.scalar_one_or_none.return_value = None
 
-        # _get_project, first token check (pre-transfer), second token check (post-transfer)
-        mock_db.execute.side_effect = [
-            mock_result_project,
-            mock_no_token,
-            mock_no_token,
-        ]
-
-        # Mock list_members call at the end
+        # _get_project, first token check (pre-transfer), second token check (post-transfer),
+        # then list_members call at the end
         mock_members_result = MagicMock()
         mock_members_result.scalar_one_or_none.return_value = project
         mock_db.execute.side_effect = [

@@ -411,27 +411,44 @@ class TestClosePullRequestGitHubSync:
         mock_github_service: MagicMock,
     ) -> None:
         """close_pull_request syncs to GitHub when github_pr_number is set."""
+        from unittest.mock import patch
+
         project = _make_project()
         pr = _make_pr(author_id=OWNER_ID, github_pr_number=42)
         user = _make_user(OWNER_ID)
 
-        # DB calls: _get_project, _get_pr, _get_github_integration, _to_pr_response -> _get_project
         integration = MagicMock()
         integration.repo_owner = "org"
         integration.repo_name = "repo"
+        integration.sync_enabled = True
+        integration.connected_by_user_id = "user-123"
+
+        token_row = MagicMock()
+        token_row.encrypted_token = "encrypted-abc"
 
         mock_db.execute.side_effect = [
             _project_result(project),
             _pr_result(pr),
-            _scalar_result(integration),  # _get_github_integration for token lookup
-            _scalar_result(None),  # UserGitHubToken lookup
+            _scalar_result(integration),  # _get_github_integration
+            _scalar_result(token_row),  # UserGitHubToken lookup
             _project_result(project),  # _to_pr_response -> _get_project
         ]
 
         mock_github_service.close_pull_request = AsyncMock()
 
-        await service.close_pull_request(PROJECT_ID, 1, user)
+        with patch(
+            "ontokit.services.pull_request_service.decrypt_token",
+            return_value="decrypted-token",
+        ):
+            await service.close_pull_request(PROJECT_ID, 1, user)
+
         assert pr.status == PRStatus.CLOSED.value
+        mock_github_service.close_pull_request.assert_awaited_once_with(
+            token="decrypted-token",
+            owner="org",
+            repo="repo",
+            pr_number=42,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +465,8 @@ class TestReopenPullRequestGitHubSync:
         mock_github_service: MagicMock,
     ) -> None:
         """reopen_pull_request syncs to GitHub when github_pr_number is set."""
+        from unittest.mock import patch
+
         project = _make_project()
         pr = _make_pr(
             author_id=OWNER_ID,
@@ -459,19 +478,35 @@ class TestReopenPullRequestGitHubSync:
         integration = MagicMock()
         integration.repo_owner = "org"
         integration.repo_name = "repo"
+        integration.sync_enabled = True
+        integration.connected_by_user_id = "user-123"
+
+        token_row = MagicMock()
+        token_row.encrypted_token = "encrypted-abc"
 
         mock_db.execute.side_effect = [
             _project_result(project),
             _pr_result(pr),
             _scalar_result(integration),  # _get_github_integration
-            _scalar_result(None),  # UserGitHubToken
+            _scalar_result(token_row),  # UserGitHubToken
             _project_result(project),  # _to_pr_response
         ]
 
         mock_github_service.reopen_pull_request = AsyncMock()
 
-        await service.reopen_pull_request(PROJECT_ID, 1, user)
+        with patch(
+            "ontokit.services.pull_request_service.decrypt_token",
+            return_value="decrypted-token",
+        ):
+            await service.reopen_pull_request(PROJECT_ID, 1, user)
+
         assert pr.status == PRStatus.OPEN.value
+        mock_github_service.reopen_pull_request.assert_awaited_once_with(
+            token="decrypted-token",
+            owner="org",
+            repo="repo",
+            pr_number=42,
+        )
 
 
 # ---------------------------------------------------------------------------
