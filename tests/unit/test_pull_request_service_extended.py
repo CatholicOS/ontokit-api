@@ -596,6 +596,11 @@ class TestMergePullRequestExtended:
 
         assert result.success is True
         mock_notif.create_notification.assert_awaited_once()
+        assert mock_notif.create_notification.await_args is not None
+        call_kwargs = mock_notif.create_notification.await_args.kwargs
+        assert call_kwargs["user_id"] == EDITOR_ID
+        assert call_kwargs["notification_type"] == "pr_merged"
+        assert call_kwargs["project_id"] == PROJECT_ID
 
 
 # ---------------------------------------------------------------------------
@@ -636,6 +641,11 @@ class TestCreateReviewNotification:
         await service.create_review(PROJECT_ID, 1, review_create, user)
 
         mock_notif.create_notification.assert_awaited_once()
+        assert mock_notif.create_notification.await_args is not None
+        call_kwargs = mock_notif.create_notification.await_args.kwargs
+        assert call_kwargs["user_id"] == EDITOR_ID
+        assert call_kwargs["notification_type"] == "pr_review"
+        assert call_kwargs["project_id"] == PROJECT_ID
 
 
 # ---------------------------------------------------------------------------
@@ -1110,6 +1120,11 @@ class TestSyncRemoteConfigForWebhooks:
         )
 
         mock_db.add.assert_called_once()
+        added_config = mock_db.add.call_args[0][0]
+        assert added_config.frequency == "webhook"
+        assert added_config.enabled is True
+        assert added_config.branch == "main"
+        assert added_config.file_path == "ontology.ttl"
 
     @pytest.mark.asyncio
     async def test_updates_sync_config_when_webhooks_disabled(

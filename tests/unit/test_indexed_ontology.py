@@ -152,6 +152,8 @@ class TestGetClassCount:
 
         count = await service.get_class_count(PROJECT_ID, branch=BRANCH)
         assert count == 42
+        mock_ontology_service.get_class_count.assert_awaited_once()
+        service._enqueue_reindex_if_stale.assert_awaited_once()
 
 
 class TestSerializePassThrough:

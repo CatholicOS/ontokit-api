@@ -621,6 +621,10 @@ class TestEmbedProject:
         mock_db.rollback.assert_awaited_once()
         # Third execute call is the raw UPDATE setting status='failed'
         assert mock_db.execute.call_count == 3
+        update_stmt = mock_db.execute.call_args_list[2][0][0]
+        compiled = update_stmt.compile(compile_kwargs={"literal_binds": True})
+        compiled_str = str(compiled)
+        assert "failed" in compiled_str
         mock_db.commit.assert_awaited()
 
     @pytest.mark.asyncio
