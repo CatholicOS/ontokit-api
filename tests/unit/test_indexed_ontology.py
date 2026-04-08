@@ -86,8 +86,8 @@ class TestGetRootTreeNodesFallback:
         service._enqueue_reindex_if_stale = AsyncMock()  # type: ignore[method-assign]
 
         await service.get_root_tree_nodes(PROJECT_ID, branch=BRANCH)
-        mock_ontology_service.get_root_tree_nodes.assert_awaited_once()
-        service._enqueue_reindex_if_stale.assert_awaited_once()
+        mock_ontology_service.get_root_tree_nodes.assert_awaited_once_with(PROJECT_ID, None, BRANCH)
+        service._enqueue_reindex_if_stale.assert_awaited_once_with(PROJECT_ID, BRANCH)
 
     @pytest.mark.asyncio
     async def test_uses_index_when_ready(
@@ -122,8 +122,8 @@ class TestGetRootTreeNodesFallback:
         service._enqueue_reindex_if_stale = AsyncMock()  # type: ignore[method-assign]
 
         await service.get_root_tree_nodes(PROJECT_ID, branch=BRANCH)
-        mock_ontology_service.get_root_tree_nodes.assert_awaited_once()
-        service._enqueue_reindex_if_stale.assert_awaited_once()
+        mock_ontology_service.get_root_tree_nodes.assert_awaited_once_with(PROJECT_ID, None, BRANCH)
+        service._enqueue_reindex_if_stale.assert_awaited_once_with(PROJECT_ID, BRANCH)
 
 
 class TestGetClassCount:
@@ -152,8 +152,27 @@ class TestGetClassCount:
 
         count = await service.get_class_count(PROJECT_ID, branch=BRANCH)
         assert count == 42
-        mock_ontology_service.get_class_count.assert_awaited_once()
-        service._enqueue_reindex_if_stale.assert_awaited_once()
+        mock_ontology_service.get_class_count.assert_awaited_once_with(PROJECT_ID, BRANCH)
+        service._enqueue_reindex_if_stale.assert_awaited_once_with(PROJECT_ID, BRANCH)
+
+    @pytest.mark.asyncio
+    async def test_falls_back_when_index_query_fails(
+        self, service: IndexedOntologyService, mock_ontology_service: AsyncMock
+    ) -> None:
+        """Falls back to OntologyService when the index query raises."""
+        service.index.is_index_ready = AsyncMock(  # type: ignore[method-assign]
+            return_value=True
+        )
+        service.index.get_class_count = AsyncMock(  # type: ignore[method-assign]
+            side_effect=RuntimeError("query failed")
+        )
+        service._enqueue_reindex_if_stale = AsyncMock()  # type: ignore[method-assign]
+        mock_ontology_service.get_class_count = AsyncMock(return_value=42)
+
+        count = await service.get_class_count(PROJECT_ID, branch=BRANCH)
+        assert count == 42
+        mock_ontology_service.get_class_count.assert_awaited_once_with(PROJECT_ID, BRANCH)
+        service._enqueue_reindex_if_stale.assert_awaited_once_with(PROJECT_ID, BRANCH)
 
 
 class TestSerializePassThrough:
