@@ -187,4 +187,4 @@ class TestSerializePassThrough:
 
         result = await service.serialize(PROJECT_ID, format="turtle", branch=BRANCH)
         assert result == "<turtle content>"
-        mock_ontology_service.serialize.assert_awaited_once()
+        mock_ontology_service.serialize.assert_awaited_once_with(PROJECT_ID, "turtle", BRANCH)

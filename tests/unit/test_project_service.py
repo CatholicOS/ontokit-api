@@ -1108,13 +1108,14 @@ class TestCreateFromGithub:
             is_public=True,
             owner=owner,
             storage=storage,
-            github_token="ghp_test123",
+            github_token="test-token",
         )
 
         assert result.name is not None
         storage.upload_file.assert_awaited_once()
         # 3 adds: project, owner member, github integration
-        assert mock_db.add.call_count >= 3
+        # 4 adds: project, owner member, github integration, normalization run
+        assert mock_db.add.call_count == 4
 
     @pytest.mark.asyncio
     async def test_github_import_clone_failure_falls_back(
@@ -1142,7 +1143,7 @@ class TestCreateFromGithub:
             is_public=True,
             owner=owner,
             storage=storage,
-            github_token="ghp_test123",
+            github_token="test-token",
         )
 
         # Should still succeed despite clone failure
@@ -1175,7 +1176,7 @@ class TestCreateFromGithub:
                 is_public=True,
                 owner=owner,
                 storage=storage,
-                github_token="ghp_test123",
+                github_token="test-token",
             )
         assert exc_info.value.status_code == 503
         mock_db.rollback.assert_awaited()
