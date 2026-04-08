@@ -1142,3 +1142,1097 @@ class TestSyncRemoteConfigForWebhooks:
         )
 
         assert sync_config.frequency == "manual"
+
+    @pytest.mark.asyncio
+    async def test_updates_existing_config_when_webhooks_enabled(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Updates existing sync config to 'webhook' when already present."""
+        integration = MagicMock()
+        integration.repo_owner = "org"
+        integration.repo_name = "repo"
+        integration.default_branch = "main"
+        integration.ontology_file_path = "ontology.ttl"
+
+        sync_config = MagicMock()
+        sync_config.frequency = "manual"
+        sync_config.enabled = False
+        mock_db.execute.return_value = _scalar_result(sync_config)
+
+        await service._sync_remote_config_for_webhooks(
+            PROJECT_ID, integration, webhooks_enabled=True
+        )
+
+        assert sync_config.frequency == "webhook"
+        assert sync_config.enabled is True
+
+
+# ---------------------------------------------------------------------------
+# handle_github_pr_webhook
+# ---------------------------------------------------------------------------
+
+
+class TestHandleGitHubPRWebhook:
+    @pytest.mark.asyncio
+    async def test_closed_merged_pr(self, service: PullRequestService, mock_db: AsyncMock) -> None:
+        """Sets status to MERGED when action=closed and merged=True."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+
+        pr = MagicMock()
+        pr.status = "open"
+
+        mock_db.execute.side_effect = [
+            _scalar_result(integration),
+            _scalar_result(pr),
+        ]
+
+        await service.handle_github_pr_webhook(
+            PROJECT_ID,
+            action="closed",
+            pr_data={"number": 42, "merged": True},
+        )
+
+        assert pr.status == "merged"
+        mock_db.commit.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_closed_not_merged(self, service: PullRequestService, mock_db: AsyncMock) -> None:
+        """Sets status to CLOSED when action=closed and merged=False."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+
+        pr = MagicMock()
+        pr.status = "open"
+
+        mock_db.execute.side_effect = [
+            _scalar_result(integration),
+            _scalar_result(pr),
+        ]
+
+        await service.handle_github_pr_webhook(
+            PROJECT_ID,
+            action="closed",
+            pr_data={"number": 42, "merged": False},
+        )
+
+        assert pr.status == "closed"
+        mock_db.commit.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_reopened_pr(self, service: PullRequestService, mock_db: AsyncMock) -> None:
+        """Sets status to OPEN when action=reopened."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+
+        pr = MagicMock()
+        pr.status = "closed"
+
+        mock_db.execute.side_effect = [
+            _scalar_result(integration),
+            _scalar_result(pr),
+        ]
+
+        await service.handle_github_pr_webhook(
+            PROJECT_ID,
+            action="reopened",
+            pr_data={"number": 42},
+        )
+
+        assert pr.status == "open"
+
+    @pytest.mark.asyncio
+    async def test_edited_pr(self, service: PullRequestService, mock_db: AsyncMock) -> None:
+        """Updates title/description when action=edited."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+
+        pr = MagicMock()
+        pr.title = "Old title"
+        pr.description = "Old body"
+
+        mock_db.execute.side_effect = [
+            _scalar_result(integration),
+            _scalar_result(pr),
+        ]
+
+        await service.handle_github_pr_webhook(
+            PROJECT_ID,
+            action="edited",
+            pr_data={"number": 42, "title": "New title", "body": "New body"},
+        )
+
+        assert pr.title == "New title"
+        assert pr.description == "New body"
+
+    @pytest.mark.asyncio
+    async def test_no_integration_returns_early(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Returns early when no integration or sync disabled."""
+        mock_db.execute.return_value = _scalar_result(None)
+
+        await service.handle_github_pr_webhook(
+            PROJECT_ID,
+            action="closed",
+            pr_data={"number": 1},
+        )
+
+        mock_db.commit.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# handle_github_review_webhook
+# ---------------------------------------------------------------------------
+
+
+class TestHandleGitHubReviewWebhook:
+    @pytest.mark.asyncio
+    async def test_submitted_review_creates_record(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Creates a review record for a submitted GitHub review."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+
+        pr = MagicMock()
+        pr.id = PR_ID
+
+        # DB: get integration, find PR, check existing review (none)
+        mock_db.execute.side_effect = [
+            _scalar_result(integration),
+            _scalar_result(pr),
+            _scalar_result(None),  # no existing review
+        ]
+
+        await service.handle_github_review_webhook(
+            PROJECT_ID,
+            action="submitted",
+            review_data={
+                "id": 999,
+                "state": "APPROVED",
+                "body": "LGTM",
+                "user": {"login": "ghuser"},
+            },
+            pr_data={"number": 42},
+        )
+
+        mock_db.add.assert_called_once()
+        mock_db.commit.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_non_submitted_action_returns_early(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Non-submitted actions are ignored."""
+        await service.handle_github_review_webhook(
+            PROJECT_ID,
+            action="dismissed",
+            review_data={"id": 1},
+            pr_data={"number": 1},
+        )
+
+        mock_db.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_existing_review_skipped(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Duplicate review IDs are skipped."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+
+        pr = MagicMock()
+        pr.id = PR_ID
+
+        existing_review = MagicMock()
+
+        mock_db.execute.side_effect = [
+            _scalar_result(integration),
+            _scalar_result(pr),
+            _scalar_result(existing_review),  # already exists
+        ]
+
+        await service.handle_github_review_webhook(
+            PROJECT_ID,
+            action="submitted",
+            review_data={
+                "id": 999,
+                "state": "APPROVED",
+                "body": "LGTM",
+                "user": {"login": "ghuser"},
+            },
+            pr_data={"number": 42},
+        )
+
+        mock_db.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_local_pr_returns_early(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Returns early when local PR not found."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+
+        mock_db.execute.side_effect = [
+            _scalar_result(integration),
+            _scalar_result(None),  # no local PR
+        ]
+
+        await service.handle_github_review_webhook(
+            PROJECT_ID,
+            action="submitted",
+            review_data={
+                "id": 999,
+                "state": "APPROVED",
+                "body": "LGTM",
+                "user": {"login": "ghuser"},
+            },
+            pr_data={"number": 42},
+        )
+
+        mock_db.add.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# handle_github_push_webhook
+# ---------------------------------------------------------------------------
+
+
+class TestHandleGitHubPushWebhook:
+    @pytest.mark.asyncio
+    async def test_push_to_main_pulls_changes(
+        self, service: PullRequestService, mock_db: AsyncMock, mock_git_service: MagicMock
+    ) -> None:
+        """Pull latest changes when push is to the default branch."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+        integration.default_branch = "main"
+        integration.last_sync_at = None
+
+        mock_db.execute.return_value = _scalar_result(integration)
+        mock_git_service.pull_branch = MagicMock()
+
+        await service.handle_github_push_webhook(
+            PROJECT_ID,
+            ref="refs/heads/main",
+            commits=[],
+        )
+
+        mock_git_service.pull_branch.assert_called_once_with(PROJECT_ID, "main", "origin")
+        mock_db.commit.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_push_to_non_default_branch_ignored(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Pushes to non-default branches are ignored."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+        integration.default_branch = "main"
+
+        mock_db.execute.return_value = _scalar_result(integration)
+
+        await service.handle_github_push_webhook(
+            PROJECT_ID,
+            ref="refs/heads/feature",
+            commits=[],
+        )
+
+        mock_db.commit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_push_pull_failure_logged(
+        self, service: PullRequestService, mock_db: AsyncMock, mock_git_service: MagicMock
+    ) -> None:
+        """Git pull failure is caught and logged, not raised."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+        integration.default_branch = "main"
+
+        mock_db.execute.return_value = _scalar_result(integration)
+        mock_git_service.pull_branch = MagicMock(side_effect=RuntimeError("network error"))
+
+        await service.handle_github_push_webhook(
+            PROJECT_ID,
+            ref="refs/heads/main",
+            commits=[],
+        )
+
+        # Should not raise, just log
+        mock_db.commit.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# create_github_integration
+# ---------------------------------------------------------------------------
+
+
+class TestCreateGitHubIntegration:
+    @pytest.mark.asyncio
+    async def test_create_integration_success(
+        self, service: PullRequestService, mock_db: AsyncMock, mock_git_service: MagicMock
+    ) -> None:
+        """Owner can create a GitHub integration."""
+        from ontokit.schemas.pull_request import GitHubIntegrationCreate
+
+        project = _make_project()
+        user = _make_user(OWNER_ID)
+
+        # DB: get project, check existing integration (none), commit, refresh
+        mock_db.execute.side_effect = [
+            _project_result(project),
+            _scalar_result(None),  # no existing integration
+        ]
+
+        # After refresh, populate attributes on the ORM object
+        def _populate_integration(obj: object, *_args: object, **_kwargs: object) -> None:
+            obj.id = uuid.uuid4()  # type: ignore[attr-defined]
+            obj.created_at = datetime.now(UTC)  # type: ignore[attr-defined]
+            obj.updated_at = None  # type: ignore[attr-defined]
+            obj.installation_id = None  # type: ignore[attr-defined]
+            obj.connected_by_user_id = user.id  # type: ignore[attr-defined]
+            obj.sync_enabled = True  # type: ignore[attr-defined]
+            obj.last_sync_at = None  # type: ignore[attr-defined]
+            obj.webhooks_enabled = False  # type: ignore[attr-defined]
+            obj.webhook_secret = None  # type: ignore[attr-defined]
+            obj.github_hook_id = None  # type: ignore[attr-defined]
+
+        mock_db.refresh.side_effect = _populate_integration
+
+        create_data = GitHubIntegrationCreate(
+            repo_owner="myorg",
+            repo_name="myrepo",
+        )
+        result = await service.create_github_integration(PROJECT_ID, create_data, user)
+
+        mock_db.add.assert_called_once()
+        mock_git_service.setup_remote.assert_called_once()
+        assert result.repo_owner == "myorg"
+
+    @pytest.mark.asyncio
+    async def test_create_integration_already_exists(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Returns 400 when integration already exists."""
+        from ontokit.schemas.pull_request import GitHubIntegrationCreate
+
+        project = _make_project()
+        user = _make_user(OWNER_ID)
+        existing = MagicMock()
+
+        mock_db.execute.side_effect = [
+            _project_result(project),
+            _scalar_result(existing),
+        ]
+
+        create_data = GitHubIntegrationCreate(repo_owner="org", repo_name="repo")
+        with pytest.raises(HTTPException) as exc_info:
+            await service.create_github_integration(PROJECT_ID, create_data, user)
+        assert exc_info.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_create_integration_not_owner_forbidden(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Non-owner cannot create integration."""
+        from ontokit.schemas.pull_request import GitHubIntegrationCreate
+
+        project = _make_project()
+        user = _make_user(EDITOR_ID)
+
+        mock_db.execute.return_value = _project_result(project)
+
+        create_data = GitHubIntegrationCreate(repo_owner="org", repo_name="repo")
+        with pytest.raises(HTTPException) as exc_info:
+            await service.create_github_integration(PROJECT_ID, create_data, user)
+        assert exc_info.value.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# update_github_integration
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateGitHubIntegration:
+    @pytest.mark.asyncio
+    async def test_update_integration_success(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Owner can update integration settings."""
+        from ontokit.schemas.pull_request import GitHubIntegrationUpdate
+
+        project = _make_project()
+        user = _make_user(OWNER_ID)
+
+        integration = MagicMock()
+        integration.id = uuid.uuid4()
+        integration.project_id = PROJECT_ID
+        integration.repo_owner = "org"
+        integration.repo_name = "repo"
+        integration.default_branch = "main"
+        integration.ontology_file_path = None
+        integration.turtle_file_path = None
+        integration.connected_by_user_id = user.id
+        integration.webhooks_enabled = False
+        integration.webhook_secret = None
+        integration.github_hook_id = None
+        integration.sync_enabled = True
+        integration.last_sync_at = None
+        integration.installation_id = None
+        integration.created_at = datetime.now(UTC)
+        integration.updated_at = None
+
+        mock_db.execute.side_effect = [
+            _project_result(project),
+            _scalar_result(integration),
+        ]
+        mock_db.refresh = AsyncMock()
+
+        update_data = GitHubIntegrationUpdate(default_branch="develop", sync_enabled=False)
+        result = await service.update_github_integration(PROJECT_ID, update_data, user)
+
+        assert integration.default_branch == "develop"
+        assert integration.sync_enabled is False
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_update_integration_enable_webhooks(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Enabling webhooks generates a secret and syncs remote config."""
+        from ontokit.schemas.pull_request import GitHubIntegrationUpdate
+
+        project = _make_project()
+        user = _make_user(OWNER_ID)
+
+        integration = MagicMock()
+        integration.id = uuid.uuid4()
+        integration.project_id = PROJECT_ID
+        integration.repo_owner = "org"
+        integration.repo_name = "repo"
+        integration.default_branch = "main"
+        integration.ontology_file_path = None
+        integration.turtle_file_path = None
+        integration.connected_by_user_id = user.id
+        integration.webhooks_enabled = False
+        integration.webhook_secret = None
+        integration.github_hook_id = None
+        integration.sync_enabled = True
+        integration.last_sync_at = None
+        integration.installation_id = None
+        integration.created_at = datetime.now(UTC)
+        integration.updated_at = None
+
+        mock_db.execute.side_effect = [
+            _project_result(project),
+            _scalar_result(integration),
+            _scalar_result(None),  # _sync_remote_config_for_webhooks query
+        ]
+        mock_db.refresh = AsyncMock()
+
+        update_data = GitHubIntegrationUpdate(webhooks_enabled=True)
+        result = await service.update_github_integration(PROJECT_ID, update_data, user)
+
+        assert integration.webhooks_enabled is True
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_update_integration_not_found(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Returns 404 when integration not found."""
+        from ontokit.schemas.pull_request import GitHubIntegrationUpdate
+
+        project = _make_project()
+        user = _make_user(OWNER_ID)
+
+        mock_db.execute.side_effect = [
+            _project_result(project),
+            _scalar_result(None),
+        ]
+
+        update_data = GitHubIntegrationUpdate(sync_enabled=False)
+        with pytest.raises(HTTPException) as exc_info:
+            await service.update_github_integration(PROJECT_ID, update_data, user)
+        assert exc_info.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# get_webhook_secret
+# ---------------------------------------------------------------------------
+
+
+class TestGetWebhookSecret:
+    @pytest.mark.asyncio
+    async def test_returns_secret(self, service: PullRequestService, mock_db: AsyncMock) -> None:
+        """Returns webhook secret and URL for owner."""
+        project = _make_project()
+        user = _make_user(OWNER_ID)
+
+        integration = MagicMock()
+        integration.webhooks_enabled = True
+        integration.webhook_secret = "s3cret"
+
+        mock_db.execute.side_effect = [
+            _project_result(project),
+            _scalar_result(integration),
+        ]
+
+        result = await service.get_webhook_secret(PROJECT_ID, user)
+        assert result["webhook_secret"] == "s3cret"
+        assert "webhook_url" in result
+
+    @pytest.mark.asyncio
+    async def test_no_integration_returns_404(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Returns 404 when integration not found."""
+        project = _make_project()
+        user = _make_user(OWNER_ID)
+
+        mock_db.execute.side_effect = [
+            _project_result(project),
+            _scalar_result(None),
+        ]
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.get_webhook_secret(PROJECT_ID, user)
+        assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_webhooks_not_enabled_returns_400(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Returns 400 when webhooks are not enabled."""
+        project = _make_project()
+        user = _make_user(OWNER_ID)
+
+        integration = MagicMock()
+        integration.webhooks_enabled = False
+
+        mock_db.execute.side_effect = [
+            _project_result(project),
+            _scalar_result(integration),
+        ]
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.get_webhook_secret(PROJECT_ID, user)
+        assert exc_info.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_not_owner_forbidden(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Non-owner cannot view webhook secret."""
+        project = _make_project()
+        user = _make_user(EDITOR_ID)
+
+        mock_db.execute.return_value = _project_result(project)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.get_webhook_secret(PROJECT_ID, user)
+        assert exc_info.value.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# get_pr_commits — forbidden and merged PR paths
+# ---------------------------------------------------------------------------
+
+
+class TestGetPRCommits:
+    @pytest.mark.asyncio
+    async def test_private_project_forbidden(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Non-member cannot get PR commits on a private project."""
+        project = _make_project(is_public=False)
+        user = _make_user(OTHER_ID)
+
+        mock_db.execute.return_value = _project_result(project)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.get_pr_commits(PROJECT_ID, 1, user)
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_merged_pr_uses_stored_hashes(
+        self, service: PullRequestService, mock_db: AsyncMock, mock_git_service: MagicMock
+    ) -> None:
+        """Merged PRs use stored commit hashes instead of branch names."""
+        project = _make_project()
+        user = _make_user(OWNER_ID)
+
+        pr = _make_pr(status="merged")
+        pr.base_commit_hash = "base111"
+        pr.head_commit_hash = "head222"
+
+        mock_db.execute.side_effect = [
+            _project_result(project),
+            _pr_result(pr),
+        ]
+
+        commit = MagicMock()
+        commit.hash = "abc"
+        commit.short_hash = "abc"
+        commit.message = "fix"
+        commit.author_name = "Dev"
+        commit.author_email = "dev@x.com"
+        commit.timestamp = "2025-01-01T00:00:00+00:00"
+        mock_git_service.get_commits_between = MagicMock(return_value=[commit])
+
+        result = await service.get_pr_commits(PROJECT_ID, 1, user)
+
+        mock_git_service.get_commits_between.assert_called_once_with(
+            PROJECT_ID, "base111", "head222"
+        )
+        assert result.total == 1
+
+
+# ---------------------------------------------------------------------------
+# get_pr_diff — forbidden path
+# ---------------------------------------------------------------------------
+
+
+class TestGetPRDiff:
+    @pytest.mark.asyncio
+    async def test_private_project_forbidden(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Non-member cannot get PR diff on a private project."""
+        project = _make_project(is_public=False)
+        user = _make_user(OTHER_ID)
+
+        mock_db.execute.return_value = _project_result(project)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.get_pr_diff(PROJECT_ID, 1, user)
+        assert exc_info.value.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# list_comments — forbidden path
+# ---------------------------------------------------------------------------
+
+
+class TestListComments:
+    @pytest.mark.asyncio
+    async def test_private_project_forbidden(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Non-member cannot list comments on a private project."""
+        project = _make_project(is_public=False)
+        user = _make_user(OTHER_ID)
+
+        mock_db.execute.return_value = _project_result(project)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.list_comments(PROJECT_ID, 1, user)
+        assert exc_info.value.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# create_comment — parent validation and GitHub sync
+# ---------------------------------------------------------------------------
+
+
+class TestCreateComment:
+    @pytest.mark.asyncio
+    async def test_create_comment_private_project_forbidden(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Non-member cannot comment on a private project."""
+        from ontokit.schemas.pull_request import CommentCreate
+
+        project = _make_project(is_public=False)
+        user = _make_user(OTHER_ID)
+
+        mock_db.execute.side_effect = [
+            _project_result(project),
+            _pr_result(_make_pr()),
+        ]
+
+        comment_data = CommentCreate(body="Hello")
+        with pytest.raises(HTTPException) as exc_info:
+            await service.create_comment(PROJECT_ID, 1, comment_data, user)
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_create_comment_parent_not_found(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Returns 404 when parent comment does not exist."""
+        from ontokit.schemas.pull_request import CommentCreate
+
+        project = _make_project()
+        pr = _make_pr()
+        user = _make_user(EDITOR_ID)
+
+        mock_db.execute.side_effect = [
+            _project_result(project),
+            _pr_result(pr),
+            _scalar_result(None),  # parent not found
+        ]
+
+        comment_data = CommentCreate(body="reply", parent_id=COMMENT_ID)
+        with pytest.raises(HTTPException) as exc_info:
+            await service.create_comment(PROJECT_ID, 1, comment_data, user)
+        assert exc_info.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# create_review — GitHub sync path
+# ---------------------------------------------------------------------------
+
+
+class TestCreateReviewGitHubSync:
+    @pytest.mark.asyncio
+    async def test_review_synced_to_github(
+        self, service: PullRequestService, mock_db: AsyncMock, mock_github_service: MagicMock
+    ) -> None:
+        """Review is synced to GitHub when PR has a github_pr_number."""
+        project = _make_project()
+        pr = _make_pr(author_id=EDITOR_ID, github_pr_number=42)
+        user = _make_user(OWNER_ID)
+
+        integration = MagicMock()
+        integration.repo_owner = "org"
+        integration.repo_name = "repo"
+        integration.sync_enabled = True
+        integration.connected_by_user_id = "user-123"
+
+        token_row = MagicMock()
+        token_row.encrypted_token = "encrypted-abc"
+
+        gh_review = MagicMock()
+        gh_review.id = 777
+
+        mock_github_service.create_review = AsyncMock(return_value=gh_review)
+
+        def _populate(obj: object) -> None:
+            obj.id = uuid.uuid4()  # type: ignore[attr-defined]
+            obj.created_at = datetime.now(UTC)  # type: ignore[attr-defined]
+
+        mock_db.execute.side_effect = [
+            _project_result(project),
+            _pr_result(pr),
+            _scalar_result(integration),  # _get_github_integration
+            _scalar_result(token_row),  # UserGitHubToken
+        ]
+        mock_db.refresh.side_effect = _populate
+
+        with patch(
+            "ontokit.services.pull_request_service.decrypt_token",
+            return_value="decrypted-token",
+        ):
+            result = await service.create_review(
+                PROJECT_ID, 1, ReviewCreate(status="approved", body="LGTM"), user
+            )
+
+        mock_github_service.create_review.assert_awaited_once()
+        assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# _sync_merge_commits_to_prs — timestamp parse error
+# ---------------------------------------------------------------------------
+
+
+class TestSyncMergeCommitsTimestampError:
+    @pytest.mark.asyncio
+    async def test_invalid_timestamp_uses_utcnow(
+        self, service: PullRequestService, mock_git_service: MagicMock, mock_db: AsyncMock
+    ) -> None:
+        """Invalid timestamp falls back to datetime.now(UTC)."""
+        commit = _make_merge_commit(merged_branch="hotfix")
+        commit.timestamp = "not-a-date"
+        mock_git_service.get_history.return_value = [commit]
+
+        merged_prs_result = _scalars_result([])
+        max_number_result = _scalar_result(0)
+        mock_db.execute.side_effect = [merged_prs_result, max_number_result]
+
+        await service._sync_merge_commits_to_prs(PROJECT_ID)
+
+        mock_db.add.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# update_pull_request — GitHub sync path
+# ---------------------------------------------------------------------------
+
+
+class TestUpdatePullRequestGitHubSync:
+    @pytest.mark.asyncio
+    async def test_update_pr_syncs_to_github(
+        self, service: PullRequestService, mock_db: AsyncMock, mock_github_service: MagicMock
+    ) -> None:
+        """update_pull_request syncs title/description to GitHub when github_pr_number is set."""
+        from ontokit.schemas.pull_request import PRUpdate
+
+        project = _make_project()
+        pr = _make_pr(author_id=OWNER_ID, github_pr_number=42)
+        user = _make_user(OWNER_ID)
+
+        integration = MagicMock()
+        integration.repo_owner = "org"
+        integration.repo_name = "repo"
+        integration.sync_enabled = True
+        integration.connected_by_user_id = "user-123"
+
+        token_row = MagicMock()
+        token_row.encrypted_token = "encrypted-abc"
+
+        mock_github_service.update_pull_request = AsyncMock()
+
+        mock_db.execute.side_effect = [
+            _project_result(project),
+            _pr_result(pr),
+            _scalar_result(integration),  # _get_github_integration
+            _scalar_result(token_row),  # UserGitHubToken
+            _project_result(project),  # _to_pr_response -> _get_project
+        ]
+        mock_db.refresh = AsyncMock()
+
+        with patch(
+            "ontokit.services.pull_request_service.decrypt_token",
+            return_value="decrypted-token",
+        ):
+            result = await service.update_pull_request(
+                PROJECT_ID, 1, PRUpdate(title="Updated title"), user
+            )
+
+        mock_github_service.update_pull_request.assert_awaited_once()
+        assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# merge_pull_request — GitHub sync path
+# ---------------------------------------------------------------------------
+
+
+class TestMergePullRequestGitHubSync:
+    @pytest.mark.asyncio
+    async def test_merge_syncs_to_github(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+        mock_git_service: MagicMock,
+        mock_github_service: MagicMock,
+    ) -> None:
+        """merge_pull_request syncs merge to GitHub when github_pr_number is set."""
+        project = _make_project()
+        pr = _make_pr(author_id=OWNER_ID, github_pr_number=42)
+        user = _make_user(OWNER_ID)
+
+        main_branch = MagicMock()
+        main_branch.name = "main"
+        main_branch.commit_hash = "aaa"
+        feature_branch = MagicMock()
+        feature_branch.name = "feature"
+        feature_branch.commit_hash = "bbb"
+        mock_git_service.list_branches.return_value = [main_branch, feature_branch]
+
+        merge_result_obj = MagicMock()
+        merge_result_obj.success = True
+        merge_result_obj.merge_commit_hash = "ccc"
+        mock_git_service.merge_branch.return_value = merge_result_obj
+
+        integration = MagicMock()
+        integration.repo_owner = "org"
+        integration.repo_name = "repo"
+        integration.sync_enabled = True
+        integration.connected_by_user_id = "user-123"
+
+        token_row = MagicMock()
+        token_row.encrypted_token = "encrypted-abc"
+
+        mock_github_service.merge_pull_request = AsyncMock()
+
+        mock_db.execute.side_effect = [
+            _project_result(project),
+            _pr_result(pr),
+            _scalar_result(integration),  # _get_github_integration
+            _scalar_result(token_row),  # UserGitHubToken
+        ]
+
+        with patch(
+            "ontokit.services.pull_request_service.decrypt_token",
+            return_value="decrypted-token",
+        ):
+            result = await service.merge_pull_request(PROJECT_ID, 1, PRMergeRequest(), user)
+
+        assert result.success is True
+        mock_github_service.merge_pull_request.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# close / reopen — exception handling in GitHub sync
+# ---------------------------------------------------------------------------
+
+
+class TestCloseReopenExceptionHandling:
+    @pytest.mark.asyncio
+    async def test_close_github_exception_still_closes(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+        mock_github_service: MagicMock,
+    ) -> None:
+        """GitHub sync failure during close doesn't prevent local close."""
+        project = _make_project()
+        pr = _make_pr(author_id=OWNER_ID, github_pr_number=42)
+        user = _make_user(OWNER_ID)
+
+        integration = MagicMock()
+        integration.repo_owner = "org"
+        integration.repo_name = "repo"
+        integration.sync_enabled = True
+        integration.connected_by_user_id = "user-123"
+
+        token_row = MagicMock()
+        token_row.encrypted_token = "encrypted-abc"
+
+        mock_github_service.close_pull_request = AsyncMock(side_effect=RuntimeError("GitHub down"))
+
+        mock_db.execute.side_effect = [
+            _project_result(project),
+            _pr_result(pr),
+            _scalar_result(integration),
+            _scalar_result(token_row),
+            _project_result(project),  # _to_pr_response
+        ]
+        mock_db.refresh = AsyncMock()
+
+        with patch(
+            "ontokit.services.pull_request_service.decrypt_token",
+            return_value="decrypted-token",
+        ):
+            result = await service.close_pull_request(PROJECT_ID, 1, user)
+
+        assert pr.status == "closed"
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_reopen_github_exception_still_reopens(
+        self,
+        service: PullRequestService,
+        mock_db: AsyncMock,
+        mock_github_service: MagicMock,
+    ) -> None:
+        """GitHub sync failure during reopen doesn't prevent local reopen."""
+        project = _make_project()
+        pr = _make_pr(
+            author_id=OWNER_ID,
+            status=PRStatus.CLOSED.value,
+            github_pr_number=42,
+        )
+        user = _make_user(OWNER_ID)
+
+        integration = MagicMock()
+        integration.repo_owner = "org"
+        integration.repo_name = "repo"
+        integration.sync_enabled = True
+        integration.connected_by_user_id = "user-123"
+
+        token_row = MagicMock()
+        token_row.encrypted_token = "encrypted-abc"
+
+        mock_github_service.reopen_pull_request = AsyncMock(side_effect=RuntimeError("GitHub down"))
+
+        mock_db.execute.side_effect = [
+            _project_result(project),
+            _pr_result(pr),
+            _scalar_result(integration),
+            _scalar_result(token_row),
+            _project_result(project),  # _to_pr_response
+        ]
+        mock_db.refresh = AsyncMock()
+
+        with patch(
+            "ontokit.services.pull_request_service.decrypt_token",
+            return_value="decrypted-token",
+        ):
+            result = await service.reopen_pull_request(PROJECT_ID, 1, user)
+
+        assert pr.status == "open"
+        assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# _get_github_token — edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestGetGitHubToken:
+    @pytest.mark.asyncio
+    async def test_no_connected_user_returns_none(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Returns None when connected_by_user_id is missing."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+        integration.connected_by_user_id = None
+
+        mock_db.execute.return_value = _scalar_result(integration)
+
+        result = await service._get_github_token(PROJECT_ID)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_no_token_row_returns_none(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Returns None when user has no stored token."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+        integration.connected_by_user_id = "user-123"
+
+        mock_db.execute.side_effect = [
+            _scalar_result(integration),
+            _scalar_result(None),  # no token row
+        ]
+
+        result = await service._get_github_token(PROJECT_ID)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_decrypt_failure_returns_none(
+        self, service: PullRequestService, mock_db: AsyncMock
+    ) -> None:
+        """Returns None when token decryption fails."""
+        integration = MagicMock()
+        integration.sync_enabled = True
+        integration.connected_by_user_id = "user-123"
+
+        token_row = MagicMock()
+        token_row.encrypted_token = "bad-encrypted"
+
+        mock_db.execute.side_effect = [
+            _scalar_result(integration),
+            _scalar_result(token_row),
+        ]
+
+        with patch(
+            "ontokit.services.pull_request_service.decrypt_token",
+            side_effect=ValueError("bad key"),
+        ):
+            result = await service._get_github_token(PROJECT_ID)
+
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# get_pull_request_service factory
+# ---------------------------------------------------------------------------
+
+
+class TestGetPullRequestServiceFactory:
+    def test_returns_service_instance(self) -> None:
+        """Factory returns a PullRequestService."""
+        from ontokit.services.pull_request_service import get_pull_request_service
+
+        db = AsyncMock()
+        svc = get_pull_request_service(db)
+        assert isinstance(svc, PullRequestService)

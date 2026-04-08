@@ -376,3 +376,40 @@ class TestLintConnectionManager:
         message: dict[str, object] = {"type": "lint_complete"}
         # Should not raise
         await mgr.broadcast("nonexistent", message)
+
+    @pytest.mark.asyncio
+    async def test_connect_adds_websocket(self) -> None:
+        """connect() accepts the websocket and adds it to active_connections."""
+        mgr = LintConnectionManager()
+        ws = AsyncMock(spec=WebSocket)
+        project_id = "test-project"
+
+        await mgr.connect(ws, project_id)
+
+        ws.accept.assert_awaited_once()
+        assert ws in mgr.active_connections[project_id]
+
+    @pytest.mark.asyncio
+    async def test_connect_multiple_to_same_project(self) -> None:
+        """connect() adds multiple websockets to the same project."""
+        mgr = LintConnectionManager()
+        ws1 = AsyncMock(spec=WebSocket)
+        ws2 = AsyncMock(spec=WebSocket)
+        project_id = "test-project"
+
+        await mgr.connect(ws1, project_id)
+        await mgr.connect(ws2, project_id)
+
+        assert len(mgr.active_connections[project_id]) == 2
+
+    def test_disconnect_websocket_not_in_list(self) -> None:
+        """disconnect() is a no-op when websocket is not in the connection list."""
+        mgr = LintConnectionManager()
+        ws1 = Mock(spec=WebSocket)
+        ws2 = Mock(spec=WebSocket)
+        project_id = "test-project"
+
+        mgr.active_connections[project_id] = [ws1]
+        # Disconnect ws2 which is not in the list - should not raise
+        mgr.disconnect(ws2, project_id)
+        assert mgr.active_connections[project_id] == [ws1]

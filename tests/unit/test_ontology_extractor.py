@@ -162,3 +162,204 @@ class TestNormalizationCheck:
         needs, report = extractor.check_normalization_needed(b"not valid", "bad.ttl")
         assert needs is False
         assert report is None
+
+    def test_already_normalized_turtle(self, extractor: OntologyMetadataExtractor) -> None:
+        """Turtle that is already normalized returns (False, None)."""
+        # First normalize, then check if normalized output needs normalization
+        normalized, _ = extractor.normalize_to_turtle(TURTLE_WITH_DC, "onto.ttl")
+        needs, report = extractor.check_normalization_needed(normalized, "onto.ttl")
+        assert needs is False
+        assert report is None
+
+
+class TestNormalizeToTurtle:
+    """Tests for normalize_to_turtle()."""
+
+    def test_unsupported_format_raises(self, extractor: OntologyMetadataExtractor) -> None:
+        """Raises UnsupportedFormatError for unsupported extensions."""
+        with pytest.raises(UnsupportedFormatError, match="Unsupported file format"):
+            extractor.normalize_to_turtle(b"data", "file.csv")
+
+    def test_rdfxml_converts_to_turtle(self, extractor: OntologyMetadataExtractor) -> None:
+        """RDF/XML is converted to Turtle with format conversion note."""
+        normalized, report = extractor.normalize_to_turtle(RDFXML_CONTENT, "onto.owl")
+        assert report.format_converted is True
+        assert report.original_format == "RDF/XML"
+        assert b"@prefix" in normalized
+
+
+class TestExtractTitleFallback:
+    """Tests for _extract_title global fallback (lines 376-382)."""
+
+    def test_title_found_via_global_search(self, extractor: OntologyMetadataExtractor) -> None:
+        """Falls back to global search when ontology_iri is None."""
+        meta = extractor.extract_metadata(TURTLE_WITH_DC, "onto.ttl")
+        assert meta.title == "My Ontology"
+
+
+class TestExtractDescriptionFallback:
+    """Tests for _extract_description global fallback (lines 408-413)."""
+
+    def test_description_found_via_global_search(
+        self, extractor: OntologyMetadataExtractor
+    ) -> None:
+        """Falls back to global search when ontology_iri is None."""
+        meta = extractor.extract_metadata(TURTLE_WITH_DC, "onto.ttl")
+        assert meta.description == "A test ontology for unit tests."
+
+
+class TestFactoryFunctions:
+    """Tests for factory functions."""
+
+    def test_get_ontology_extractor(self) -> None:
+        """get_ontology_extractor returns an OntologyMetadataExtractor."""
+        from ontokit.services.ontology_extractor import get_ontology_extractor
+
+        result = get_ontology_extractor()
+        assert isinstance(result, OntologyMetadataExtractor)
+
+    def test_get_ontology_metadata_updater(self) -> None:
+        """get_ontology_metadata_updater returns an OntologyMetadataUpdater."""
+        from ontokit.services.ontology_extractor import (
+            OntologyMetadataUpdater,
+            get_ontology_metadata_updater,
+        )
+
+        result = get_ontology_metadata_updater()
+        assert isinstance(result, OntologyMetadataUpdater)
+
+
+class TestOntologyMetadataUpdater:
+    """Tests for OntologyMetadataUpdater (lines 459-646)."""
+
+    def test_detect_title_property_dc(self) -> None:
+        """detect_title_property finds dc:title."""
+        from ontokit.services.ontology_extractor import OntologyMetadataUpdater
+
+        updater = OntologyMetadataUpdater()
+        from rdflib import Graph, URIRef
+
+        g = Graph()
+        g.parse(data=TURTLE_WITH_DC, format="turtle")
+        ontology_iri = URIRef("http://example.org/onto")
+
+        result = updater.detect_title_property(g, ontology_iri)
+        assert result is not None
+        assert result.property_curie == "dc:title"
+        assert result.current_value == "My Ontology"
+
+    def test_detect_title_property_none_iri(self) -> None:
+        """detect_title_property returns None when ontology_iri is None."""
+        from ontokit.services.ontology_extractor import OntologyMetadataUpdater
+
+        updater = OntologyMetadataUpdater()
+        from rdflib import Graph
+
+        g = Graph()
+        result = updater.detect_title_property(g, None)
+        assert result is None
+
+    def test_detect_description_property_dc(self) -> None:
+        """detect_description_property finds dc:description."""
+        from ontokit.services.ontology_extractor import OntologyMetadataUpdater
+
+        updater = OntologyMetadataUpdater()
+        from rdflib import Graph, URIRef
+
+        g = Graph()
+        g.parse(data=TURTLE_WITH_DC, format="turtle")
+        ontology_iri = URIRef("http://example.org/onto")
+
+        result = updater.detect_description_property(g, ontology_iri)
+        assert result is not None
+        assert result.property_curie == "dc:description"
+
+    def test_detect_description_property_none_iri(self) -> None:
+        """detect_description_property returns None when ontology_iri is None."""
+        from ontokit.services.ontology_extractor import OntologyMetadataUpdater
+
+        updater = OntologyMetadataUpdater()
+        from rdflib import Graph
+
+        g = Graph()
+        result = updater.detect_description_property(g, None)
+        assert result is None
+
+    def test_update_metadata_title(self) -> None:
+        """update_metadata changes the title."""
+        from ontokit.services.ontology_extractor import OntologyMetadataUpdater
+
+        updater = OntologyMetadataUpdater()
+        content, changes = updater.update_metadata(
+            TURTLE_WITH_DC, "onto.ttl", new_title="Updated Title"
+        )
+        assert any("Title" in c for c in changes)
+        assert b"Updated Title" in content
+
+    def test_update_metadata_description(self) -> None:
+        """update_metadata changes the description."""
+        from ontokit.services.ontology_extractor import OntologyMetadataUpdater
+
+        updater = OntologyMetadataUpdater()
+        content, changes = updater.update_metadata(
+            TURTLE_WITH_DC, "onto.ttl", new_description="New description"
+        )
+        assert any("Description" in c for c in changes)
+        assert b"New description" in content
+
+    def test_update_metadata_no_existing_title(self) -> None:
+        """update_metadata adds dc:title when no title property exists."""
+        from ontokit.services.ontology_extractor import OntologyMetadataUpdater
+
+        updater = OntologyMetadataUpdater()
+        # Use ontology without title
+        turtle_no_title = b"""\
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+<http://example.org/onto> rdf:type owl:Ontology .
+"""
+        content, changes = updater.update_metadata(
+            turtle_no_title, "onto.ttl", new_title="Brand New Title"
+        )
+        assert any("dc:title" in c and "added" in c for c in changes)
+
+    def test_update_metadata_no_existing_description(self) -> None:
+        """update_metadata adds dc:description when no description property exists."""
+        from ontokit.services.ontology_extractor import OntologyMetadataUpdater
+
+        updater = OntologyMetadataUpdater()
+        turtle_no_desc = b"""\
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+<http://example.org/onto> rdf:type owl:Ontology .
+"""
+        content, changes = updater.update_metadata(
+            turtle_no_desc, "onto.ttl", new_description="Brand New Description"
+        )
+        assert any("dc:description" in c and "added" in c for c in changes)
+
+    def test_update_metadata_unsupported_format(self) -> None:
+        """update_metadata raises UnsupportedFormatError for unknown extensions."""
+        from ontokit.services.ontology_extractor import OntologyMetadataUpdater
+
+        updater = OntologyMetadataUpdater()
+        with pytest.raises(UnsupportedFormatError, match="Unsupported format"):
+            updater.update_metadata(b"data", "file.csv", new_title="X")
+
+    def test_update_metadata_invalid_content(self) -> None:
+        """update_metadata raises OntologyParseError for invalid content."""
+        from ontokit.services.ontology_extractor import OntologyMetadataUpdater
+
+        updater = OntologyMetadataUpdater()
+        with pytest.raises(OntologyParseError, match="Failed to parse"):
+            updater.update_metadata(b"not valid turtle {{{", "bad.ttl", new_title="X")
+
+    def test_update_metadata_no_ontology_declaration(self) -> None:
+        """update_metadata raises OntologyParseError when no owl:Ontology found."""
+        from ontokit.services.ontology_extractor import OntologyMetadataUpdater
+
+        updater = OntologyMetadataUpdater()
+        with pytest.raises(OntologyParseError, match="no owl:Ontology"):
+            updater.update_metadata(TURTLE_NO_ONTOLOGY, "classes.ttl", new_title="X")
