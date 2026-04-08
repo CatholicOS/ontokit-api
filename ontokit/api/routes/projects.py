@@ -556,7 +556,7 @@ async def _ensure_ontology_loaded(
                 ) from e
             except ValueError as e:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail=str(e),
                 ) from e
 
@@ -1274,7 +1274,7 @@ async def save_source_content(
         g.parse(data=data.content, format="turtle")
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Invalid Turtle syntax: {e}",
         ) from e
 

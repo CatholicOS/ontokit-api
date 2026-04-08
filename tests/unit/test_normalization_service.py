@@ -224,6 +224,10 @@ class TestGetObjectName:
         """Strips the bucket prefix from a path with '/'."""
         assert service._get_object_name("ontokit/ontology.ttl") == "ontology.ttl"
 
+    def test_deep_nested_path(self, service: NormalizationService) -> None:
+        """Strips only the first segment (bucket prefix) from a multi-segment path."""
+        assert service._get_object_name("bucket/subdir/file.ttl") == "subdir/file.ttl"
+
     def test_returns_as_is_without_slash(self, service: NormalizationService) -> None:
         """Returns the path as-is when no '/' is present."""
         assert service._get_object_name("ontology.ttl") == "ontology.ttl"

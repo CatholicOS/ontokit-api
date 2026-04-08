@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -130,16 +131,16 @@ class TestCreate:
         # After commit + refresh, the project object should have attributes set.
         # The service calls self.db.add, flush, add (owner member), commit, refresh.
         # Simulate refresh by populating server-generated fields and relationships.
-        def _simulate_refresh(obj: object, _attrs: list[str] | None = None) -> None:
+        def _simulate_refresh(obj: Any, _attrs: list[str] | None = None) -> None:
             if getattr(obj, "id", None) is None:
-                obj.id = uuid.uuid4()  # type: ignore[attr-defined]
+                obj.id = uuid.uuid4()
             if getattr(obj, "created_at", None) is None:
-                obj.created_at = datetime.now(UTC)  # type: ignore[attr-defined]
+                obj.created_at = datetime.now(UTC)
             # Set relationships that would normally be loaded by refresh
             if not getattr(obj, "members", None):
-                obj.members = [_make_member(owner.id, "owner")]  # type: ignore[attr-defined]
+                obj.members = [_make_member(owner.id, "owner")]
             if not hasattr(obj, "github_integration"):
-                obj.github_integration = None  # type: ignore[attr-defined]
+                obj.github_integration = None
 
         mock_db.refresh.side_effect = _simulate_refresh
 
@@ -355,11 +356,11 @@ class TestAddMember:
         owner = _make_user(user_id=OWNER_ID)
         member_data = MemberCreate(user_id="new-user-id", role="editor")
 
-        def _simulate_refresh(obj: object, _attrs: list[str] | None = None) -> None:
+        def _simulate_refresh(obj: Any, _attrs: list[str] | None = None) -> None:
             if getattr(obj, "id", None) is None:
-                obj.id = uuid.uuid4()  # type: ignore[attr-defined]
+                obj.id = uuid.uuid4()
             if getattr(obj, "created_at", None) is None:
-                obj.created_at = datetime.now(UTC)  # type: ignore[attr-defined]
+                obj.created_at = datetime.now(UTC)
 
         mock_db.refresh.side_effect = _simulate_refresh
 
@@ -937,3 +938,1023 @@ class TestBranchPreference:
 
         result = await service.get_branch_preference(PROJECT_ID, "ghost-user")
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# create_from_import
+# ---------------------------------------------------------------------------
+
+
+class TestCreateFromImport:
+    @pytest.mark.asyncio
+    async def test_import_success(self, service: ProjectService, mock_db: AsyncMock) -> None:
+        """Importing an ontology file creates project + uploads to storage."""
+        owner = _make_user()
+        storage = AsyncMock()
+        storage.upload_file = AsyncMock(return_value="projects/xyz/ontology.ttl")
+
+        turtle_content = (
+            b"@prefix owl: <http://www.w3.org/2002/07/owl#> .\n<http://ex.org/ont> a owl:Ontology ."
+        )
+
+        def _simulate_refresh(obj: Any, _attrs: list[str] | None = None) -> None:
+            if getattr(obj, "id", None) is None:
+                obj.id = uuid.uuid4()
+            if getattr(obj, "created_at", None) is None:
+                obj.created_at = datetime.now(UTC)
+            if not getattr(obj, "members", None):
+                obj.members = [_make_member(owner.id, "owner")]
+            if not hasattr(obj, "github_integration"):
+                obj.github_integration = None
+            if not hasattr(obj, "source_file_path"):
+                obj.source_file_path = "projects/xyz/ontology.ttl"
+            if not hasattr(obj, "ontology_iri"):
+                obj.ontology_iri = "http://ex.org/ont"
+            if not hasattr(obj, "normalization_report"):
+                obj.normalization_report = None
+            if not hasattr(obj, "updated_at"):
+                obj.updated_at = None
+            if not hasattr(obj, "label_preferences"):
+                obj.label_preferences = None
+            if not hasattr(obj, "pr_approval_required"):
+                obj.pr_approval_required = 0
+
+        mock_db.refresh.side_effect = _simulate_refresh
+
+        result = await service.create_from_import(
+            file_content=turtle_content,
+            filename="test.ttl",
+            is_public=True,
+            owner=owner,
+            storage=storage,
+        )
+
+        assert result.name is not None
+        storage.upload_file.assert_awaited_once()
+        mock_db.commit.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_import_unsupported_format(
+        self,
+        service: ProjectService,
+        mock_db: AsyncMock,  # noqa: ARG002
+    ) -> None:
+        """Importing an unsupported file format raises 400."""
+        owner = _make_user()
+        storage = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.create_from_import(
+                file_content=b"not an ontology",
+                filename="test.docx",
+                is_public=True,
+                owner=owner,
+                storage=storage,
+            )
+        assert exc_info.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_import_parse_error(self, service: ProjectService, mock_db: AsyncMock) -> None:  # noqa: ARG002
+        """Importing a malformed ontology file raises 422."""
+        owner = _make_user()
+        storage = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.create_from_import(
+                file_content=b"@prefix invalid turtle syntax {{{",
+                filename="broken.ttl",
+                is_public=True,
+                owner=owner,
+                storage=storage,
+            )
+        assert exc_info.value.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_import_storage_failure(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Storage upload failure raises 503 and rolls back."""
+        from ontokit.services.storage import StorageError
+
+        owner = _make_user()
+        storage = AsyncMock()
+        storage.upload_file = AsyncMock(side_effect=StorageError("connection refused"))
+
+        turtle_content = (
+            b"@prefix owl: <http://www.w3.org/2002/07/owl#> .\n<http://ex.org/ont> a owl:Ontology ."
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.create_from_import(
+                file_content=turtle_content,
+                filename="test.ttl",
+                is_public=True,
+                owner=owner,
+                storage=storage,
+            )
+        assert exc_info.value.status_code == 503
+        mock_db.rollback.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_import_with_name_override(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """name_override takes precedence over extracted metadata."""
+        owner = _make_user()
+        storage = AsyncMock()
+        storage.upload_file = AsyncMock(return_value="projects/xyz/ontology.ttl")
+
+        turtle_content = (
+            b"@prefix owl: <http://www.w3.org/2002/07/owl#> .\n<http://ex.org/ont> a owl:Ontology ."
+        )
+
+        def _simulate_refresh(obj: Any, _attrs: list[str] | None = None) -> None:
+            if getattr(obj, "id", None) is None:
+                obj.id = uuid.uuid4()
+            if getattr(obj, "created_at", None) is None:
+                obj.created_at = datetime.now(UTC)
+            if not getattr(obj, "members", None):
+                obj.members = [_make_member(owner.id, "owner")]
+            if not hasattr(obj, "github_integration"):
+                obj.github_integration = None
+            if not hasattr(obj, "source_file_path"):
+                obj.source_file_path = "projects/xyz/ontology.ttl"
+            if not hasattr(obj, "ontology_iri"):
+                obj.ontology_iri = "http://ex.org/ont"
+            if not hasattr(obj, "normalization_report"):
+                obj.normalization_report = None
+            if not hasattr(obj, "updated_at"):
+                obj.updated_at = None
+            if not hasattr(obj, "label_preferences"):
+                obj.label_preferences = None
+            if not hasattr(obj, "pr_approval_required"):
+                obj.pr_approval_required = 0
+
+        mock_db.refresh.side_effect = _simulate_refresh
+
+        result = await service.create_from_import(
+            file_content=turtle_content,
+            filename="test.ttl",
+            is_public=True,
+            owner=owner,
+            storage=storage,
+            name_override="Custom Name",
+        )
+
+        assert result.name == "Custom Name"
+
+
+# ---------------------------------------------------------------------------
+# create_from_github
+# ---------------------------------------------------------------------------
+
+
+class TestCreateFromGithub:
+    @pytest.mark.asyncio
+    async def test_github_import_success(
+        self, service: ProjectService, mock_db: AsyncMock, mock_git_service: MagicMock
+    ) -> None:
+        """Importing from GitHub creates project + GitHub integration."""
+        owner = _make_user()
+        storage = AsyncMock()
+        storage.upload_file = AsyncMock(return_value="projects/xyz/ontology.ttl")
+        mock_git_service.clone_from_github = MagicMock()
+        mock_git_service.commit_changes = MagicMock(return_value=MagicMock(hash="def456"))
+
+        turtle_content = (
+            b"@prefix owl: <http://www.w3.org/2002/07/owl#> .\n<http://ex.org/ont> a owl:Ontology ."
+        )
+
+        def _simulate_refresh(obj: Any, _attrs: list[str] | None = None) -> None:
+            if getattr(obj, "id", None) is None:
+                obj.id = uuid.uuid4()
+            if getattr(obj, "created_at", None) is None:
+                obj.created_at = datetime.now(UTC)
+            if not getattr(obj, "members", None):
+                obj.members = [_make_member(owner.id, "owner")]
+            if not hasattr(obj, "github_integration"):
+                obj.github_integration = None
+            if not hasattr(obj, "source_file_path"):
+                obj.source_file_path = "projects/xyz/ontology.ttl"
+            if not hasattr(obj, "ontology_iri"):
+                obj.ontology_iri = "http://ex.org/ont"
+            if not hasattr(obj, "normalization_report"):
+                obj.normalization_report = None
+            if not hasattr(obj, "updated_at"):
+                obj.updated_at = None
+            if not hasattr(obj, "label_preferences"):
+                obj.label_preferences = None
+            if not hasattr(obj, "pr_approval_required"):
+                obj.pr_approval_required = 0
+
+        mock_db.refresh.side_effect = _simulate_refresh
+
+        result = await service.create_from_github(
+            file_content=turtle_content,
+            filename="ontology.ttl",
+            repo_owner="testorg",
+            repo_name="testrepo",
+            ontology_file_path="src/ontology.ttl",
+            default_branch="main",
+            is_public=True,
+            owner=owner,
+            storage=storage,
+            github_token="ghp_test123",
+        )
+
+        assert result.name is not None
+        storage.upload_file.assert_awaited_once()
+        # 3 adds: project, owner member, github integration
+        assert mock_db.add.call_count >= 3
+
+    @pytest.mark.asyncio
+    async def test_github_import_clone_failure_falls_back(
+        self, service: ProjectService, mock_db: AsyncMock, mock_git_service: MagicMock
+    ) -> None:
+        """Clone failure falls back to local git init."""
+        owner = _make_user()
+        storage = AsyncMock()
+        storage.upload_file = AsyncMock(return_value="projects/xyz/ontology.ttl")
+        mock_git_service.clone_from_github = MagicMock(side_effect=Exception("clone failed"))
+
+        turtle_content = (
+            b"@prefix owl: <http://www.w3.org/2002/07/owl#> .\n<http://ex.org/ont> a owl:Ontology ."
+        )
+
+        def _simulate_refresh(obj: Any, _attrs: list[str] | None = None) -> None:
+            if getattr(obj, "id", None) is None:
+                obj.id = uuid.uuid4()
+            if getattr(obj, "created_at", None) is None:
+                obj.created_at = datetime.now(UTC)
+            if not getattr(obj, "members", None):
+                obj.members = [_make_member(owner.id, "owner")]
+            if not hasattr(obj, "github_integration"):
+                obj.github_integration = None
+            if not hasattr(obj, "source_file_path"):
+                obj.source_file_path = "projects/xyz/ontology.ttl"
+            if not hasattr(obj, "ontology_iri"):
+                obj.ontology_iri = "http://ex.org/ont"
+            if not hasattr(obj, "normalization_report"):
+                obj.normalization_report = None
+            if not hasattr(obj, "updated_at"):
+                obj.updated_at = None
+            if not hasattr(obj, "label_preferences"):
+                obj.label_preferences = None
+            if not hasattr(obj, "pr_approval_required"):
+                obj.pr_approval_required = 0
+
+        mock_db.refresh.side_effect = _simulate_refresh
+
+        result = await service.create_from_github(
+            file_content=turtle_content,
+            filename="ontology.ttl",
+            repo_owner="testorg",
+            repo_name="testrepo",
+            ontology_file_path="src/ontology.ttl",
+            default_branch="main",
+            is_public=True,
+            owner=owner,
+            storage=storage,
+            github_token="ghp_test123",
+        )
+
+        # Should still succeed despite clone failure
+        assert result.name is not None
+        mock_git_service.initialize_repository.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_github_import_storage_failure(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Storage failure during GitHub import raises 503."""
+        from ontokit.services.storage import StorageError
+
+        owner = _make_user()
+        storage = AsyncMock()
+        storage.upload_file = AsyncMock(side_effect=StorageError("connection refused"))
+
+        turtle_content = (
+            b"@prefix owl: <http://www.w3.org/2002/07/owl#> .\n<http://ex.org/ont> a owl:Ontology ."
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.create_from_github(
+                file_content=turtle_content,
+                filename="ontology.ttl",
+                repo_owner="testorg",
+                repo_name="testrepo",
+                ontology_file_path="src/ontology.ttl",
+                default_branch="main",
+                is_public=True,
+                owner=owner,
+                storage=storage,
+                github_token="ghp_test123",
+            )
+        assert exc_info.value.status_code == 503
+        mock_db.rollback.assert_awaited()
+
+
+# ---------------------------------------------------------------------------
+# _sync_metadata_to_rdf
+# ---------------------------------------------------------------------------
+
+
+class TestSyncMetadataToRdf:
+    @pytest.mark.asyncio
+    async def test_sync_skips_when_no_source_file(self, service: ProjectService) -> None:
+        """No-op when project has no source file."""
+        project = _make_project()
+        project.source_file_path = None
+        user = _make_user()
+        storage = AsyncMock()
+
+        result = await service._sync_metadata_to_rdf(
+            project=project, new_name="New", new_description=None, user=user, storage=storage
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_sync_updates_rdf_and_commits(
+        self, service: ProjectService, mock_git_service: MagicMock
+    ) -> None:
+        """Metadata changes update storage and commit to git."""
+        project = _make_project()
+        project.source_file_path = "ontologies/projects/abc/ontology.ttl"
+        project.github_integration = None
+        user = _make_user()
+        storage = AsyncMock()
+
+        turtle_content = (
+            b"@prefix owl: <http://www.w3.org/2002/07/owl#> .\n"
+            b"@prefix dc: <http://purl.org/dc/elements/1.1/> .\n"
+            b'<http://ex.org/ont> a owl:Ontology ; dc:title "Old Title" .\n'
+        )
+        mock_git_service.get_file_at_version = MagicMock(
+            return_value=turtle_content.decode("utf-8")
+        )
+        mock_git_service.commit_changes = MagicMock(
+            return_value=MagicMock(hash="abc123", short_hash="abc123")
+        )
+
+        result = await service._sync_metadata_to_rdf(
+            project=project, new_name="New Title", new_description=None, user=user, storage=storage
+        )
+
+        storage.upload_file.assert_awaited_once()
+        mock_git_service.commit_changes.assert_called_once()
+        assert result == "abc123"
+
+    @pytest.mark.asyncio
+    async def test_sync_no_changes_needed(
+        self, service: ProjectService, mock_git_service: MagicMock
+    ) -> None:
+        """Returns None when OntologyMetadataUpdater reports no changes."""
+        project = _make_project()
+        project.source_file_path = "ontologies/projects/abc/ontology.ttl"
+        project.github_integration = None
+        user = _make_user()
+        storage = AsyncMock()
+
+        # Turtle with no title/description metadata to update
+        turtle_content = (
+            b"@prefix owl: <http://www.w3.org/2002/07/owl#> .\n"
+            b"<http://ex.org/ont> a owl:Ontology .\n"
+        )
+        mock_git_service.get_file_at_version = MagicMock(
+            return_value=turtle_content.decode("utf-8")
+        )
+
+        result = await service._sync_metadata_to_rdf(
+            project=project, new_name=None, new_description=None, user=user, storage=storage
+        )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_sync_storage_download_failure(
+        self, service: ProjectService, mock_git_service: MagicMock
+    ) -> None:
+        """Storage download failure returns None (graceful)."""
+        from ontokit.services.storage import StorageError
+
+        project = _make_project()
+        project.source_file_path = "ontologies/projects/abc/ontology.ttl"
+        project.github_integration = None
+        user = _make_user()
+        storage = AsyncMock()
+
+        mock_git_service.repository_exists = MagicMock(return_value=False)
+        storage.download_file = AsyncMock(side_effect=StorageError("not found"))
+
+        result = await service._sync_metadata_to_rdf(
+            project=project, new_name="New", new_description=None, user=user, storage=storage
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_sync_falls_back_to_minio_when_git_fails(
+        self, service: ProjectService, mock_git_service: MagicMock
+    ) -> None:
+        """Falls back to MinIO download when git read fails."""
+        project = _make_project()
+        project.source_file_path = "ontologies/projects/abc/ontology.ttl"
+        project.github_integration = None
+        user = _make_user()
+        storage = AsyncMock()
+
+        turtle_content = (
+            b"@prefix owl: <http://www.w3.org/2002/07/owl#> .\n"
+            b"@prefix dc: <http://purl.org/dc/elements/1.1/> .\n"
+            b'<http://ex.org/ont> a owl:Ontology ; dc:title "Old" .\n'
+        )
+        mock_git_service.get_file_at_version = MagicMock(side_effect=Exception("git error"))
+        storage.download_file = AsyncMock(return_value=turtle_content)
+        mock_git_service.commit_changes = MagicMock(
+            return_value=MagicMock(hash="def456", short_hash="def456")
+        )
+
+        result = await service._sync_metadata_to_rdf(
+            project=project, new_name="Updated", new_description=None, user=user, storage=storage
+        )
+
+        storage.download_file.assert_awaited_once()
+        assert result == "def456"
+
+
+# ---------------------------------------------------------------------------
+# update with metadata sync
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateWithMetadataSync:
+    @pytest.mark.asyncio
+    async def test_update_name_triggers_rdf_sync(
+        self, service: ProjectService, mock_db: AsyncMock, mock_git_service: MagicMock
+    ) -> None:
+        """Changing name with storage triggers _sync_metadata_to_rdf."""
+        project = _make_project()
+        project.name = "Old Name"
+        project.source_file_path = "ontologies/projects/abc/ontology.ttl"
+        project.github_integration = None
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = mock_result
+
+        turtle_content = (
+            b"@prefix owl: <http://www.w3.org/2002/07/owl#> .\n"
+            b"@prefix dc: <http://purl.org/dc/elements/1.1/> .\n"
+            b'<http://ex.org/ont> a owl:Ontology ; dc:title "Old Name" .\n'
+        )
+        mock_git_service.get_file_at_version = MagicMock(
+            return_value=turtle_content.decode("utf-8")
+        )
+        mock_git_service.commit_changes = MagicMock(
+            return_value=MagicMock(hash="sync123", short_hash="sync123")
+        )
+
+        owner = _make_user(user_id=OWNER_ID)
+        storage = AsyncMock()
+        storage.upload_file = AsyncMock()
+        update_data = ProjectUpdate(name="New Name")
+
+        await service.update(PROJECT_ID, update_data, owner, storage=storage)
+
+        mock_git_service.commit_changes.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_update_label_preferences(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Updating label_preferences stores JSON."""
+        project = _make_project()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = mock_result
+
+        owner = _make_user(user_id=OWNER_ID)
+        update_data = ProjectUpdate(label_preferences=["rdfs:label@en"])
+
+        await service.update(PROJECT_ID, update_data, owner)
+
+        import json
+
+        assert project.label_preferences == json.dumps(["rdfs:label@en"])
+
+
+# ---------------------------------------------------------------------------
+# delete with git cleanup
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteGitCleanup:
+    @pytest.mark.asyncio
+    async def test_delete_cleans_up_git_repo(
+        self, service: ProjectService, mock_db: AsyncMock, mock_git_service: MagicMock
+    ) -> None:
+        """Deleting a project also deletes the git repository."""
+        project = _make_project()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = mock_result
+
+        owner = _make_user(user_id=OWNER_ID)
+        await service.delete(PROJECT_ID, owner)
+
+        mock_git_service.delete_repository.assert_called_once_with(PROJECT_ID)
+
+    @pytest.mark.asyncio
+    async def test_delete_git_failure_is_graceful(
+        self, service: ProjectService, mock_db: AsyncMock, mock_git_service: MagicMock
+    ) -> None:
+        """Git repo deletion failure doesn't prevent project deletion."""
+        project = _make_project()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = mock_result
+        mock_git_service.delete_repository = MagicMock(side_effect=Exception("git error"))
+
+        owner = _make_user(user_id=OWNER_ID)
+        # Should not raise
+        await service.delete(PROJECT_ID, owner)
+        mock_db.delete.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_superadmin_can_delete(self, service: ProjectService, mock_db: AsyncMock) -> None:
+        """Superadmin can delete any project."""
+        project = _make_project()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = mock_result
+
+        superadmin = _make_user(user_id="superadmin-id")
+
+        with patch("ontokit.core.auth.settings") as mock_settings:
+            mock_settings.superadmin_ids = ["superadmin-id"]
+            await service.delete(PROJECT_ID, superadmin)
+
+        mock_db.delete.assert_awaited()
+
+
+# ---------------------------------------------------------------------------
+# list_members with access_token
+# ---------------------------------------------------------------------------
+
+
+class TestListMembersWithToken:
+    @pytest.mark.asyncio
+    async def test_list_members_with_access_token(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """With access_token, fetches info for other members from Zitadel."""
+        members = [
+            _make_member(OWNER_ID, "owner"),
+            _make_member(EDITOR_ID, "editor"),
+        ]
+        project = _make_project(members=members)
+
+        mock_result_project = MagicMock()
+        mock_result_project.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = mock_result_project
+
+        user = _make_user(user_id=OWNER_ID)
+
+        with patch("ontokit.services.user_service.get_user_service") as mock_us:
+            mock_user_service = MagicMock()
+            mock_user_service.get_users_info = AsyncMock(
+                return_value={
+                    EDITOR_ID: {"id": EDITOR_ID, "name": "Editor", "email": "editor@test.com"}
+                }
+            )
+            mock_us.return_value = mock_user_service
+
+            result = await service.list_members(PROJECT_ID, user, access_token="token123")
+
+        assert result.total == 2
+        mock_user_service.get_users_info.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_list_members_private_project_denied(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Non-member cannot list members of a private project."""
+        project = _make_project(is_public=False)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = mock_result
+
+        stranger = _make_user(user_id="stranger-id")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.list_members(PROJECT_ID, stranger)
+        assert exc_info.value.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# add_member edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestAddMemberEdgeCases:
+    @pytest.mark.asyncio
+    async def test_add_member_denied_for_editor(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Editor cannot add members."""
+        members = [_make_member(OWNER_ID, "owner"), _make_member(EDITOR_ID, "editor")]
+        project = _make_project(members=members)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = mock_result
+
+        editor = _make_user(user_id=EDITOR_ID)
+        member_data = MemberCreate(user_id="new-user-id", role="viewer")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.add_member(PROJECT_ID, member_data, editor)
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_add_already_existing_member(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Adding an already-existing member raises 400."""
+        project = _make_project()
+        mock_result_project = MagicMock()
+        mock_result_project.scalar_one_or_none.return_value = project
+        mock_result_existing = MagicMock()
+        mock_result_existing.scalar_one_or_none.return_value = _make_member(EDITOR_ID, "editor")
+        mock_db.execute.side_effect = [mock_result_project, mock_result_existing]
+
+        owner = _make_user(user_id=OWNER_ID)
+        member_data = MemberCreate(user_id=EDITOR_ID, role="editor")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.add_member(PROJECT_ID, member_data, owner)
+        assert exc_info.value.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# update_member edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateMemberEdgeCases:
+    @pytest.mark.asyncio
+    async def test_admin_cannot_promote_to_admin(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Admin cannot promote others to admin (owner only)."""
+        members = [_make_member(OWNER_ID, "owner"), _make_member(ADMIN_ID, "admin")]
+        project = _make_project(members=members)
+
+        mock_result_project = MagicMock()
+        mock_result_project.scalar_one_or_none.return_value = project
+
+        editor_member = _make_member(EDITOR_ID, "editor")
+        mock_result_member = MagicMock()
+        mock_result_member.scalar_one_or_none.return_value = editor_member
+
+        mock_db.execute.side_effect = [mock_result_project, mock_result_member]
+
+        admin = _make_user(user_id=ADMIN_ID)
+        from ontokit.schemas.project import MemberUpdate
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.update_member(PROJECT_ID, EDITOR_ID, MemberUpdate(role="admin"), admin)
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_editor_cannot_update_roles(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Editor cannot update member roles."""
+        members = [_make_member(OWNER_ID, "owner"), _make_member(EDITOR_ID, "editor")]
+        project = _make_project(members=members)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = mock_result
+
+        editor = _make_user(user_id=EDITOR_ID)
+        from ontokit.schemas.project import MemberUpdate
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.update_member(PROJECT_ID, VIEWER_ID, MemberUpdate(role="editor"), editor)
+        assert exc_info.value.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# remove_member edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestRemoveMemberEdgeCases:
+    @pytest.mark.asyncio
+    async def test_remove_member_not_found(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Removing a non-existent member raises 404."""
+        project = _make_project()
+        mock_result_project = MagicMock()
+        mock_result_project.scalar_one_or_none.return_value = project
+        mock_result_member = MagicMock()
+        mock_result_member.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [mock_result_project, mock_result_member]
+
+        owner = _make_user(user_id=OWNER_ID)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.remove_member(PROJECT_ID, "ghost-user", owner)
+        assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_admin_cannot_remove_other_admin(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Admin cannot remove another admin."""
+        admin2_id = "admin2-user-id"
+        members = [
+            _make_member(OWNER_ID, "owner"),
+            _make_member(ADMIN_ID, "admin"),
+            _make_member(admin2_id, "admin"),
+        ]
+        project = _make_project(members=members)
+        mock_result_project = MagicMock()
+        mock_result_project.scalar_one_or_none.return_value = project
+
+        admin2_member = _make_member(admin2_id, "admin")
+        mock_result_member = MagicMock()
+        mock_result_member.scalar_one_or_none.return_value = admin2_member
+        mock_db.execute.side_effect = [mock_result_project, mock_result_member]
+
+        admin = _make_user(user_id=ADMIN_ID)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.remove_member(PROJECT_ID, admin2_id, admin)
+        assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_self_removal_allowed(self, service: ProjectService, mock_db: AsyncMock) -> None:
+        """A member can remove themselves."""
+        members = [_make_member(OWNER_ID, "owner"), _make_member(EDITOR_ID, "editor")]
+        project = _make_project(members=members)
+        mock_result_project = MagicMock()
+        mock_result_project.scalar_one_or_none.return_value = project
+
+        editor_member = _make_member(EDITOR_ID, "editor")
+        mock_result_member = MagicMock()
+        mock_result_member.scalar_one_or_none.return_value = editor_member
+        mock_db.execute.side_effect = [mock_result_project, mock_result_member]
+
+        editor = _make_user(user_id=EDITOR_ID)
+        await service.remove_member(PROJECT_ID, EDITOR_ID, editor)
+
+        mock_db.delete.assert_awaited()
+
+
+# ---------------------------------------------------------------------------
+# transfer_ownership edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestTransferOwnershipEdgeCases:
+    @pytest.mark.asyncio
+    async def test_transfer_to_non_member(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Transferring to a non-member raises 404."""
+        project = _make_project()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = mock_result
+
+        owner = _make_user(user_id=OWNER_ID)
+        transfer = TransferOwnership(new_owner_id="non-member-id")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.transfer_ownership(PROJECT_ID, transfer, owner)
+        assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_transfer_github_integration_no_token_blocked(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Transfer blocked when new owner lacks GitHub token (without force)."""
+        admin_member = _make_member(ADMIN_ID, "admin")
+        project = _make_project(members=[_make_member(OWNER_ID, "owner"), admin_member])
+        project.github_integration = MagicMock()  # has GitHub integration
+
+        mock_result_project = MagicMock()
+        mock_result_project.scalar_one_or_none.return_value = project
+
+        mock_no_token = MagicMock()
+        mock_no_token.scalar_one_or_none.return_value = None
+
+        mock_db.execute.side_effect = [mock_result_project, mock_no_token]
+
+        owner = _make_user(user_id=OWNER_ID)
+        transfer = TransferOwnership(new_owner_id=ADMIN_ID)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await service.transfer_ownership(PROJECT_ID, transfer, owner)
+        assert exc_info.value.status_code == 409
+
+    @pytest.mark.asyncio
+    async def test_transfer_github_integration_force_deletes(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Force transfer deletes GitHub integration when new owner has no token."""
+        admin_member = _make_member(ADMIN_ID, "admin")
+        owner_member = _make_member(OWNER_ID, "owner")
+        project = _make_project(members=[owner_member, admin_member])
+        project.github_integration = MagicMock()
+
+        mock_result_project = MagicMock()
+        mock_result_project.scalar_one_or_none.return_value = project
+
+        mock_no_token = MagicMock()
+        mock_no_token.scalar_one_or_none.return_value = None
+
+        # _get_project, first token check (pre-transfer), second token check (post-transfer)
+        mock_db.execute.side_effect = [
+            mock_result_project,
+            mock_no_token,
+            mock_no_token,
+        ]
+
+        # Mock list_members call at the end
+        mock_members_result = MagicMock()
+        mock_members_result.scalar_one_or_none.return_value = project
+        mock_db.execute.side_effect = [
+            mock_result_project,
+            mock_no_token,
+            mock_no_token,
+            mock_members_result,
+        ]
+
+        owner = _make_user(user_id=OWNER_ID)
+        transfer = TransferOwnership(new_owner_id=ADMIN_ID)
+
+        with patch.object(service, "list_members", new_callable=AsyncMock) as mock_list:
+            mock_list.return_value = MagicMock()
+            await service.transfer_ownership(PROJECT_ID, transfer, owner, force=True)
+
+        mock_db.delete.assert_awaited()
+        assert admin_member.role == "owner"
+        assert owner_member.role == "admin"
+
+    @pytest.mark.asyncio
+    async def test_transfer_github_integration_preserved_with_token(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Transfer preserves GitHub integration when new owner has a token."""
+        admin_member = _make_member(ADMIN_ID, "admin")
+        owner_member = _make_member(OWNER_ID, "owner")
+        project = _make_project(members=[owner_member, admin_member])
+        github_int = MagicMock()
+        project.github_integration = github_int
+
+        mock_result_project = MagicMock()
+        mock_result_project.scalar_one_or_none.return_value = project
+
+        mock_has_token = MagicMock()
+        mock_has_token.scalar_one_or_none.return_value = MagicMock()  # token exists
+
+        mock_db.execute.side_effect = [
+            mock_result_project,
+            mock_has_token,
+            mock_has_token,
+        ]
+
+        owner = _make_user(user_id=OWNER_ID)
+        transfer = TransferOwnership(new_owner_id=ADMIN_ID)
+
+        with patch.object(service, "list_members", new_callable=AsyncMock) as mock_list:
+            mock_list.return_value = MagicMock()
+            await service.transfer_ownership(PROJECT_ID, transfer, owner)
+
+        assert github_int.connected_by_user_id == ADMIN_ID
+        assert admin_member.role == "owner"
+
+    @pytest.mark.asyncio
+    async def test_superadmin_can_transfer(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """Superadmin can transfer ownership even if not the owner."""
+        admin_member = _make_member(ADMIN_ID, "admin")
+        owner_member = _make_member(OWNER_ID, "owner")
+        project = _make_project(members=[owner_member, admin_member])
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = project
+        mock_db.execute.return_value = mock_result
+
+        superadmin = _make_user(user_id="superadmin-id")
+        transfer = TransferOwnership(new_owner_id=ADMIN_ID)
+
+        with (
+            patch("ontokit.core.auth.settings") as mock_settings,
+            patch.object(service, "list_members", new_callable=AsyncMock) as mock_list,
+        ):
+            mock_settings.superadmin_ids = ["superadmin-id"]
+            mock_list.return_value = MagicMock()
+            await service.transfer_ownership(PROJECT_ID, transfer, superadmin)
+
+        assert admin_member.role == "owner"
+        assert owner_member.role == "admin"
+
+
+# ---------------------------------------------------------------------------
+# _get_git_ontology_path
+# ---------------------------------------------------------------------------
+
+
+class TestGetGitOntologyPath:
+    def test_github_integration_turtle_path(self, service: ProjectService) -> None:
+        """Uses turtle_file_path when available."""
+        project = _make_project()
+        project.github_integration = MagicMock()
+        project.github_integration.turtle_file_path = "src/ontology.ttl"
+        project.github_integration.ontology_file_path = "src/ontology.owl"
+
+        result = service._get_git_ontology_path(project)
+        assert result == "src/ontology.ttl"
+
+    def test_github_integration_ontology_path_fallback(self, service: ProjectService) -> None:
+        """Falls back to ontology_file_path when no turtle_file_path."""
+        project = _make_project()
+        project.github_integration = MagicMock()
+        project.github_integration.turtle_file_path = None
+        project.github_integration.ontology_file_path = "src/ontology.owl"
+
+        result = service._get_git_ontology_path(project)
+        assert result == "src/ontology.owl"
+
+    def test_source_file_path_basename(self, service: ProjectService) -> None:
+        """Uses basename of source_file_path when no GitHub integration."""
+        project = _make_project()
+        project.github_integration = None
+        project.source_file_path = "projects/abc/ontology.ttl"
+
+        result = service._get_git_ontology_path(project)
+        assert result == "ontology.ttl"
+
+    def test_default_fallback(self, service: ProjectService) -> None:
+        """Returns 'ontology.ttl' when nothing else is available."""
+        project = _make_project()
+        project.github_integration = None
+        project.source_file_path = None
+
+        result = service._get_git_ontology_path(project)
+        assert result == "ontology.ttl"
+
+
+# ---------------------------------------------------------------------------
+# _to_response edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestToResponseEdgeCases:
+    def test_normalization_report_deserialized(self, service: ProjectService) -> None:
+        """_to_response deserializes normalization_report from JSON."""
+        project = _make_project()
+        project.normalization_report = (
+            '{"original_format": "xml", "original_filename": "test.owl",'
+            ' "original_size_bytes": 1000, "normalized_size_bytes": 800,'
+            ' "triple_count": 50, "prefixes_before": [], "prefixes_after": [],'
+            ' "prefixes_removed": [], "prefixes_added": [],'
+            ' "format_converted": true, "blank_node_count": 0,'
+            ' "used_canonical_bnodes": false, "notes": []}'
+        )
+        user = _make_user(user_id=OWNER_ID)
+
+        response = service._to_response(project, user)
+        assert response.normalization_report is not None
+        assert response.normalization_report.original_format == "xml"
+
+    def test_invalid_normalization_report_returns_none(self, service: ProjectService) -> None:
+        """Malformed normalization_report JSON returns None."""
+        project = _make_project()
+        project.normalization_report = "not valid json"
+        user = _make_user(user_id=OWNER_ID)
+
+        response = service._to_response(project, user)
+        assert response.normalization_report is None
+
+    def test_invalid_label_preferences_returns_none(self, service: ProjectService) -> None:
+        """Malformed label_preferences JSON returns None."""
+        project = _make_project()
+        project.label_preferences = "{bad json"
+        user = _make_user(user_id=OWNER_ID)
+
+        response = service._to_response(project, user)
+        assert response.label_preferences is None
+
+    def test_git_ontology_path_in_response(self, service: ProjectService) -> None:
+        """Response includes git_ontology_path when source_file_path is set."""
+        project = _make_project()
+        project.source_file_path = "projects/abc/ontology.ttl"
+        project.github_integration = None
+        user = _make_user(user_id=OWNER_ID)
+
+        response = service._to_response(project, user)
+        assert response.git_ontology_path == "ontology.ttl"

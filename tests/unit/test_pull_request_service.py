@@ -798,10 +798,13 @@ class TestMergePullRequest:
         pr = _make_pr()
         user = _make_user(OWNER_ID)
 
-        mock_git_service.list_branches.return_value = [
-            MagicMock(name="main", commit_hash="a1"),
-            MagicMock(name="feature", commit_hash="b2"),
-        ]
+        main_branch = MagicMock()
+        main_branch.name = "main"
+        main_branch.commit_hash = "a1"
+        feature_branch = MagicMock()
+        feature_branch.name = "feature"
+        feature_branch.commit_hash = "b2"
+        mock_git_service.list_branches.return_value = [main_branch, feature_branch]
         merge_result = MagicMock()
         merge_result.success = False
         merge_result.message = "Conflicts detected"

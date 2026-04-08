@@ -87,66 +87,32 @@ class TestSearchRoute:
         response = client.get("/api/v1/search")
         assert response.status_code == 422
 
+    @pytest.mark.parametrize(
+        ("query", "expect_detail"),
+        [
+            ("INSERT DATA { <http://ex.org/s> <http://ex.org/p> <http://ex.org/o> }", True),
+            ("DELETE WHERE { ?s ?p ?o }", False),
+            ("DROP GRAPH <http://example.org/graph>", False),
+            ("CLEAR ALL", False),
+            ("CREATE GRAPH <http://example.org/new>", False),
+        ],
+        ids=["insert", "delete", "drop", "clear", "create"],
+    )
     @patch("ontokit.api.routes.search.verify_project_access", _noop_verify_access)
-    def test_sparql_blocks_insert(self, mock_db_client: TestClient) -> None:
-        """POST /api/v1/search/sparql with INSERT query returns 400."""
+    def test_sparql_blocks_mutation(
+        self, mock_db_client: TestClient, query: str, expect_detail: bool
+    ) -> None:
+        """POST /api/v1/search/sparql with mutating queries returns 400."""
         response = mock_db_client.post(
             "/api/v1/search/sparql",
             json={
-                "query": "INSERT DATA { <http://ex.org/s> <http://ex.org/p> <http://ex.org/o> }",
+                "query": query,
                 "ontology_id": "00000000-0000-0000-0000-000000000000",
             },
         )
         assert response.status_code == 400
-        assert "not allowed" in response.json()["detail"].lower()
-
-    @patch("ontokit.api.routes.search.verify_project_access", _noop_verify_access)
-    def test_sparql_blocks_delete(self, mock_db_client: TestClient) -> None:
-        """POST /api/v1/search/sparql with DELETE query returns 400."""
-        response = mock_db_client.post(
-            "/api/v1/search/sparql",
-            json={
-                "query": "DELETE WHERE { ?s ?p ?o }",
-                "ontology_id": "00000000-0000-0000-0000-000000000000",
-            },
-        )
-        assert response.status_code == 400
-
-    @patch("ontokit.api.routes.search.verify_project_access", _noop_verify_access)
-    def test_sparql_blocks_drop(self, mock_db_client: TestClient) -> None:
-        """POST /api/v1/search/sparql with DROP query returns 400."""
-        response = mock_db_client.post(
-            "/api/v1/search/sparql",
-            json={
-                "query": "DROP GRAPH <http://example.org/graph>",
-                "ontology_id": "00000000-0000-0000-0000-000000000000",
-            },
-        )
-        assert response.status_code == 400
-
-    @patch("ontokit.api.routes.search.verify_project_access", _noop_verify_access)
-    def test_sparql_blocks_clear(self, mock_db_client: TestClient) -> None:
-        """POST /api/v1/search/sparql with CLEAR query returns 400."""
-        response = mock_db_client.post(
-            "/api/v1/search/sparql",
-            json={
-                "query": "CLEAR ALL",
-                "ontology_id": "00000000-0000-0000-0000-000000000000",
-            },
-        )
-        assert response.status_code == 400
-
-    @patch("ontokit.api.routes.search.verify_project_access", _noop_verify_access)
-    def test_sparql_blocks_create(self, mock_db_client: TestClient) -> None:
-        """POST /api/v1/search/sparql with CREATE query returns 400."""
-        response = mock_db_client.post(
-            "/api/v1/search/sparql",
-            json={
-                "query": "CREATE GRAPH <http://example.org/new>",
-                "ontology_id": "00000000-0000-0000-0000-000000000000",
-            },
-        )
-        assert response.status_code == 400
+        if expect_detail:
+            assert "not allowed" in response.json()["detail"].lower()
 
     def test_sparql_empty_query_rejected(self, client: TestClient) -> None:
         """POST /api/v1/search/sparql with empty query returns 422."""

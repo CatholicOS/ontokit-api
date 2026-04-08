@@ -38,7 +38,10 @@ def mock_db() -> AsyncMock:
 def service(mock_ontology_service: AsyncMock, mock_db: AsyncMock) -> IndexedOntologyService:
     """Create an IndexedOntologyService with mocked dependencies."""
     svc = IndexedOntologyService(mock_ontology_service, mock_db)
-    # Mock the index service
+    # Replace the real OntologyIndexService created by the constructor with an
+    # AsyncMock test double.  We use object.__setattr__ because
+    # IndexedOntologyService uses __slots__, which prevents normal attribute
+    # assignment for slot-defined attributes after __init__.
     object.__setattr__(svc, "index", AsyncMock())
     return svc
 

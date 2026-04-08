@@ -61,26 +61,35 @@ def extractor() -> OntologyMetadataExtractor:
 class TestFormatDetection:
     """Tests for format detection helpers."""
 
-    def test_turtle_extension(self) -> None:
-        assert OntologyMetadataExtractor.get_format_for_extension(".ttl") == "turtle"
+    @pytest.mark.parametrize(
+        ("ext", "expected"),
+        [
+            (".ttl", "turtle"),
+            (".owl", "xml"),
+            (".jsonld", "json-ld"),
+            (".csv", None),
+        ],
+    )
+    def test_get_format_for_extension(self, ext: str, expected: str | None) -> None:
+        assert OntologyMetadataExtractor.get_format_for_extension(ext) == expected
 
-    def test_rdfxml_extension(self) -> None:
-        assert OntologyMetadataExtractor.get_format_for_extension(".owl") == "xml"
+    @pytest.mark.parametrize(
+        ("ext", "expected"),
+        [(".ttl", True), (".csv", False)],
+    )
+    def test_is_supported_extension(self, ext: str, expected: bool) -> None:  # noqa: FBT001
+        assert OntologyMetadataExtractor.is_supported_extension(ext) is expected
 
-    def test_jsonld_extension(self) -> None:
-        assert OntologyMetadataExtractor.get_format_for_extension(".jsonld") == "json-ld"
-
-    def test_unsupported_extension_returns_none(self) -> None:
-        assert OntologyMetadataExtractor.get_format_for_extension(".csv") is None
-
-    def test_is_supported_extension(self) -> None:
-        assert OntologyMetadataExtractor.is_supported_extension(".ttl") is True
-        assert OntologyMetadataExtractor.is_supported_extension(".csv") is False
-
-    def test_get_content_type(self) -> None:
-        assert OntologyMetadataExtractor.get_content_type(".ttl") == "text/turtle"
-        assert OntologyMetadataExtractor.get_content_type(".owl") == "application/rdf+xml"
-        assert OntologyMetadataExtractor.get_content_type(".xyz") == "application/octet-stream"
+    @pytest.mark.parametrize(
+        ("ext", "expected"),
+        [
+            (".ttl", "text/turtle"),
+            (".owl", "application/rdf+xml"),
+            (".xyz", "application/octet-stream"),
+        ],
+    )
+    def test_get_content_type(self, ext: str, expected: str) -> None:
+        assert OntologyMetadataExtractor.get_content_type(ext) == expected
 
 
 class TestExtractMetadataTurtle:

@@ -117,7 +117,7 @@ class ProjectService:
             ) from e
         except OntologyParseError as e:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=str(e),
             ) from e
 
@@ -284,7 +284,7 @@ class ProjectService:
             ) from e
         except OntologyParseError as e:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=str(e),
             ) from e
 
