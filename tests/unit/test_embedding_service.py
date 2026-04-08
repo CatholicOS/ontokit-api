@@ -536,7 +536,9 @@ class TestEmbedProject:
         # Job should end as "completed" (it was set to "running" then "completed")
         assert existing_job.status == "completed"
         # db.add should NOT be called for the job (it already existed)
-        # (db.add may still be called for other objects though)
+        for call in mock_db.add.call_args_list:
+            added_obj = call[0][0]
+            assert getattr(added_obj, "id", None) != existing_job.id
 
     @pytest.mark.asyncio
     async def test_embed_project_no_project_raises(

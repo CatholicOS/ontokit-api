@@ -69,6 +69,43 @@ def _make_user(
     return CurrentUser(id=user_id, email=email, name=name, username="testuser", roles=[])
 
 
+def _make_simulate_refresh(
+    owner_id: str = OWNER_ID,
+    *,
+    extended: bool = False,
+) -> Any:
+    """Return a side_effect callable for mock_db.refresh that populates ORM fields.
+
+    Use ``extended=True`` for import/create tests that need extra fields like
+    source_file_path, ontology_iri, etc.
+    """
+
+    def _refresh(obj: Any, _attrs: list[str] | None = None) -> None:
+        if getattr(obj, "id", None) is None:
+            obj.id = uuid.uuid4()
+        if getattr(obj, "created_at", None) is None:
+            obj.created_at = datetime.now(UTC)
+        if not getattr(obj, "members", None):
+            obj.members = [_make_member(owner_id, "owner")]
+        if not hasattr(obj, "github_integration"):
+            obj.github_integration = None
+        if extended:
+            if not hasattr(obj, "source_file_path"):
+                obj.source_file_path = "projects/xyz/ontology.ttl"
+            if not hasattr(obj, "ontology_iri"):
+                obj.ontology_iri = "http://ex.org/ont"
+            if not hasattr(obj, "normalization_report"):
+                obj.normalization_report = None
+            if not hasattr(obj, "updated_at"):
+                obj.updated_at = None
+            if not hasattr(obj, "label_preferences"):
+                obj.label_preferences = None
+            if not hasattr(obj, "pr_approval_required"):
+                obj.pr_approval_required = 0
+
+    return _refresh
+
+
 @pytest.fixture
 def mock_db() -> AsyncMock:
     """Create an async mock of AsyncSession."""
@@ -128,21 +165,7 @@ class TestCreate:
         owner = _make_user()
         data = ProjectCreate(name="My Ontology", description="desc", is_public=True)
 
-        # After commit + refresh, the project object should have attributes set.
-        # The service calls self.db.add, flush, add (owner member), commit, refresh.
-        # Simulate refresh by populating server-generated fields and relationships.
-        def _simulate_refresh(obj: Any, _attrs: list[str] | None = None) -> None:
-            if getattr(obj, "id", None) is None:
-                obj.id = uuid.uuid4()
-            if getattr(obj, "created_at", None) is None:
-                obj.created_at = datetime.now(UTC)
-            # Set relationships that would normally be loaded by refresh
-            if not getattr(obj, "members", None):
-                obj.members = [_make_member(owner.id, "owner")]
-            if not hasattr(obj, "github_integration"):
-                obj.github_integration = None
-
-        mock_db.refresh.side_effect = _simulate_refresh
+        mock_db.refresh.side_effect = _make_simulate_refresh(owner.id)
 
         result = await service.create(data, owner)
 
@@ -356,13 +379,7 @@ class TestAddMember:
         owner = _make_user(user_id=OWNER_ID)
         member_data = MemberCreate(user_id="new-user-id", role="editor")
 
-        def _simulate_refresh(obj: Any, _attrs: list[str] | None = None) -> None:
-            if getattr(obj, "id", None) is None:
-                obj.id = uuid.uuid4()
-            if getattr(obj, "created_at", None) is None:
-                obj.created_at = datetime.now(UTC)
-
-        mock_db.refresh.side_effect = _simulate_refresh
+        mock_db.refresh.side_effect = _make_simulate_refresh(owner.id)
 
         with patch("ontokit.services.user_service.get_user_service") as mock_us:
             mock_user_service = MagicMock()
@@ -951,29 +968,7 @@ class TestCreateFromImport:
             b"@prefix owl: <http://www.w3.org/2002/07/owl#> .\n<http://ex.org/ont> a owl:Ontology ."
         )
 
-        def _simulate_refresh(obj: Any, _attrs: list[str] | None = None) -> None:
-            if getattr(obj, "id", None) is None:
-                obj.id = uuid.uuid4()
-            if getattr(obj, "created_at", None) is None:
-                obj.created_at = datetime.now(UTC)
-            if not getattr(obj, "members", None):
-                obj.members = [_make_member(owner.id, "owner")]
-            if not hasattr(obj, "github_integration"):
-                obj.github_integration = None
-            if not hasattr(obj, "source_file_path"):
-                obj.source_file_path = "projects/xyz/ontology.ttl"
-            if not hasattr(obj, "ontology_iri"):
-                obj.ontology_iri = "http://ex.org/ont"
-            if not hasattr(obj, "normalization_report"):
-                obj.normalization_report = None
-            if not hasattr(obj, "updated_at"):
-                obj.updated_at = None
-            if not hasattr(obj, "label_preferences"):
-                obj.label_preferences = None
-            if not hasattr(obj, "pr_approval_required"):
-                obj.pr_approval_required = 0
-
-        mock_db.refresh.side_effect = _simulate_refresh
+        mock_db.refresh.side_effect = _make_simulate_refresh(owner.id, extended=True)
 
         result = await service.create_from_import(
             file_content=turtle_content,
@@ -1062,29 +1057,7 @@ class TestCreateFromImport:
             b"@prefix owl: <http://www.w3.org/2002/07/owl#> .\n<http://ex.org/ont> a owl:Ontology ."
         )
 
-        def _simulate_refresh(obj: Any, _attrs: list[str] | None = None) -> None:
-            if getattr(obj, "id", None) is None:
-                obj.id = uuid.uuid4()
-            if getattr(obj, "created_at", None) is None:
-                obj.created_at = datetime.now(UTC)
-            if not getattr(obj, "members", None):
-                obj.members = [_make_member(owner.id, "owner")]
-            if not hasattr(obj, "github_integration"):
-                obj.github_integration = None
-            if not hasattr(obj, "source_file_path"):
-                obj.source_file_path = "projects/xyz/ontology.ttl"
-            if not hasattr(obj, "ontology_iri"):
-                obj.ontology_iri = "http://ex.org/ont"
-            if not hasattr(obj, "normalization_report"):
-                obj.normalization_report = None
-            if not hasattr(obj, "updated_at"):
-                obj.updated_at = None
-            if not hasattr(obj, "label_preferences"):
-                obj.label_preferences = None
-            if not hasattr(obj, "pr_approval_required"):
-                obj.pr_approval_required = 0
-
-        mock_db.refresh.side_effect = _simulate_refresh
+        mock_db.refresh.side_effect = _make_simulate_refresh(owner.id, extended=True)
 
         result = await service.create_from_import(
             file_content=turtle_content,
@@ -1119,29 +1092,7 @@ class TestCreateFromGithub:
             b"@prefix owl: <http://www.w3.org/2002/07/owl#> .\n<http://ex.org/ont> a owl:Ontology ."
         )
 
-        def _simulate_refresh(obj: Any, _attrs: list[str] | None = None) -> None:
-            if getattr(obj, "id", None) is None:
-                obj.id = uuid.uuid4()
-            if getattr(obj, "created_at", None) is None:
-                obj.created_at = datetime.now(UTC)
-            if not getattr(obj, "members", None):
-                obj.members = [_make_member(owner.id, "owner")]
-            if not hasattr(obj, "github_integration"):
-                obj.github_integration = None
-            if not hasattr(obj, "source_file_path"):
-                obj.source_file_path = "projects/xyz/ontology.ttl"
-            if not hasattr(obj, "ontology_iri"):
-                obj.ontology_iri = "http://ex.org/ont"
-            if not hasattr(obj, "normalization_report"):
-                obj.normalization_report = None
-            if not hasattr(obj, "updated_at"):
-                obj.updated_at = None
-            if not hasattr(obj, "label_preferences"):
-                obj.label_preferences = None
-            if not hasattr(obj, "pr_approval_required"):
-                obj.pr_approval_required = 0
-
-        mock_db.refresh.side_effect = _simulate_refresh
+        mock_db.refresh.side_effect = _make_simulate_refresh(owner.id, extended=True)
 
         result = await service.create_from_github(
             file_content=turtle_content,
@@ -1175,29 +1126,7 @@ class TestCreateFromGithub:
             b"@prefix owl: <http://www.w3.org/2002/07/owl#> .\n<http://ex.org/ont> a owl:Ontology ."
         )
 
-        def _simulate_refresh(obj: Any, _attrs: list[str] | None = None) -> None:
-            if getattr(obj, "id", None) is None:
-                obj.id = uuid.uuid4()
-            if getattr(obj, "created_at", None) is None:
-                obj.created_at = datetime.now(UTC)
-            if not getattr(obj, "members", None):
-                obj.members = [_make_member(owner.id, "owner")]
-            if not hasattr(obj, "github_integration"):
-                obj.github_integration = None
-            if not hasattr(obj, "source_file_path"):
-                obj.source_file_path = "projects/xyz/ontology.ttl"
-            if not hasattr(obj, "ontology_iri"):
-                obj.ontology_iri = "http://ex.org/ont"
-            if not hasattr(obj, "normalization_report"):
-                obj.normalization_report = None
-            if not hasattr(obj, "updated_at"):
-                obj.updated_at = None
-            if not hasattr(obj, "label_preferences"):
-                obj.label_preferences = None
-            if not hasattr(obj, "pr_approval_required"):
-                obj.pr_approval_required = 0
-
-        mock_db.refresh.side_effect = _simulate_refresh
+        mock_db.refresh.side_effect = _make_simulate_refresh(owner.id, extended=True)
 
         result = await service.create_from_github(
             file_content=turtle_content,
