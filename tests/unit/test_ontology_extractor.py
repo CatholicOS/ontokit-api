@@ -66,6 +66,7 @@ class TestFormatDetection:
         [
             (".ttl", "turtle"),
             (".owl", "xml"),
+            (".owx", "xml"),
             (".jsonld", "json-ld"),
             (".csv", None),
         ],
@@ -192,9 +193,19 @@ class TestExtractTitleFallback:
     """Tests for _extract_title global fallback (lines 376-382)."""
 
     def test_title_found_via_global_search(self, extractor: OntologyMetadataExtractor) -> None:
-        """Falls back to global search when ontology_iri is None."""
-        meta = extractor.extract_metadata(TURTLE_WITH_DC, "onto.ttl")
-        assert meta.title == "My Ontology"
+        """Falls back to global search when _find_ontology_iri returns None."""
+        # Turtle where owl:Ontology has no rdf:about, so _find_ontology_iri returns None
+        turtle_no_iri = b"""\
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix dc: <http://purl.org/dc/elements/1.1/> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+_:ont rdf:type owl:Ontology ;
+    dc:title "Fallback Title" .
+"""
+        meta = extractor.extract_metadata(turtle_no_iri, "onto.ttl")
+        assert meta.title == "Fallback Title"
+        assert meta.ontology_iri is None
 
 
 class TestExtractDescriptionFallback:
@@ -203,9 +214,18 @@ class TestExtractDescriptionFallback:
     def test_description_found_via_global_search(
         self, extractor: OntologyMetadataExtractor
     ) -> None:
-        """Falls back to global search when ontology_iri is None."""
-        meta = extractor.extract_metadata(TURTLE_WITH_DC, "onto.ttl")
-        assert meta.description == "A test ontology for unit tests."
+        """Falls back to global search when _find_ontology_iri returns None."""
+        turtle_no_iri = b"""\
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix dc: <http://purl.org/dc/elements/1.1/> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+_:ont rdf:type owl:Ontology ;
+    dc:description "Fallback Description" .
+"""
+        meta = extractor.extract_metadata(turtle_no_iri, "onto.ttl")
+        assert meta.description == "Fallback Description"
+        assert meta.ontology_iri is None
 
 
 class TestFactoryFunctions:
@@ -323,6 +343,7 @@ class TestOntologyMetadataUpdater:
             turtle_no_title, "onto.ttl", new_title="Brand New Title"
         )
         assert any("dc:title" in c and "added" in c for c in changes)
+        assert b"Brand New Title" in content
 
     def test_update_metadata_no_existing_description(self) -> None:
         """update_metadata adds dc:description when no description property exists."""
@@ -339,6 +360,7 @@ class TestOntologyMetadataUpdater:
             turtle_no_desc, "onto.ttl", new_description="Brand New Description"
         )
         assert any("dc:description" in c and "added" in c for c in changes)
+        assert b"Brand New Description" in content
 
     def test_update_metadata_unsupported_format(self) -> None:
         """update_metadata raises UnsupportedFormatError for unknown extensions."""

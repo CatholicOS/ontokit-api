@@ -1118,7 +1118,7 @@ class TestCreateProjectFromGitHub:
             },
         )
         assert response.status_code == 201
-        mock_pool.enqueue_job.assert_called_once()
+        mock_pool.enqueue_job.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -1234,7 +1234,7 @@ class TestImportProject:
             files={"file": ("ontology.ttl", VALID_TURTLE.encode(), "text/turtle")},
         )
         assert response.status_code == 201
-        mock_pool.enqueue_job.assert_called_once()
+        mock_pool.enqueue_job.assert_awaited_once()
 
     @patch("ontokit.api.routes.projects.get_arq_pool", new_callable=AsyncMock)
     def test_import_project_arq_pool_none(
@@ -1704,7 +1704,7 @@ class TestOntologyNavigation:
 
         response = client.get(f"/api/v1/projects/{PROJECT_ID}/ontology/tree")
         assert response.status_code == 200
-        mock_ontology_service.load_from_git.assert_called_once()
+        mock_ontology_service.load_from_git.assert_awaited_once()
 
     def test_ensure_ontology_loaded_value_error(
         self,
@@ -1777,7 +1777,7 @@ class TestOntologyNavigation:
 
         response = client.get(f"/api/v1/projects/{PROJECT_ID}/ontology/tree")
         assert response.status_code == 200
-        mock_ontology_service.load_from_storage.assert_called_once()
+        mock_ontology_service.load_from_storage.assert_awaited_once()
 
     def test_ensure_ontology_storage_error(
         self,
