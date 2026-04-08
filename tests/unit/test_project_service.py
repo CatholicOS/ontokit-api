@@ -381,6 +381,10 @@ class TestAddMember:
 
         mock_db.refresh.side_effect = _make_simulate_refresh(owner.id)
 
+        # Patch at the definition module — project_service uses inline imports
+        # (`from ontokit.services.user_service import get_user_service` inside
+        # function bodies), so the symbol is resolved from user_service at call
+        # time, not bound to project_service's namespace.
         with patch("ontokit.services.user_service.get_user_service") as mock_us:
             mock_user_service = MagicMock()
             mock_user_service.get_user_info = AsyncMock(
