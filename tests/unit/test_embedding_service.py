@@ -40,6 +40,7 @@ def mock_db() -> AsyncMock:
     """Create an async mock of AsyncSession."""
     session = AsyncMock()
     session.commit = AsyncMock()
+    session.rollback = AsyncMock()
     session.execute = AsyncMock()
     session.refresh = AsyncMock()
     session.add = Mock()
@@ -250,12 +251,12 @@ class TestHelperUtilities:
         """_get_fernet returns a Fernet instance derived from settings.secret_key."""
         from unittest.mock import patch
 
+        from ontokit.services.embedding_service import _get_fernet
+
         mock_settings = MagicMock()
         mock_settings.secret_key = "test-secret-key-for-unit-tests"
 
-        with patch("ontokit.services.embedding_service.settings", mock_settings, create=True):
-            from ontokit.services.embedding_service import _get_fernet
-
+        with patch("ontokit.core.config.settings", mock_settings):
             fernet = _get_fernet()
             assert fernet is not None
 
@@ -263,12 +264,12 @@ class TestHelperUtilities:
         """Encrypting then decrypting a secret returns the original plaintext."""
         from unittest.mock import patch
 
+        from ontokit.services.embedding_service import _decrypt_secret, _encrypt_secret
+
         mock_settings = MagicMock()
         mock_settings.secret_key = "test-secret-key-for-unit-tests"
 
-        with patch("ontokit.services.embedding_service.settings", mock_settings, create=True):
-            from ontokit.services.embedding_service import _decrypt_secret, _encrypt_secret
-
+        with patch("ontokit.core.config.settings", mock_settings):
             plaintext = "my-api-key-12345"
             encrypted = _encrypt_secret(plaintext)
             assert encrypted != plaintext

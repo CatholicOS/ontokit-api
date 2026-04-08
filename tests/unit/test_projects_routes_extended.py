@@ -18,8 +18,9 @@ from ontokit.api.routes.projects import (
     get_service,
     get_storage,
 )
+from ontokit.core.auth import CurrentUser, get_current_user_with_token
 from ontokit.main import app
-from ontokit.schemas.project import ProjectResponse
+from ontokit.schemas.project import MemberListResponse, MemberResponse, ProjectResponse
 from ontokit.services.project_service import ProjectService
 
 PROJECT_ID = uuid.UUID("12345678-1234-5678-1234-567812345678")
@@ -463,15 +464,46 @@ class TestSearchEntities:
 
 
 class TestListMembers:
-    def test_list_members_route_exists(
+    def test_list_members_returns_200(
         self,
         authed_client: tuple[TestClient, AsyncMock],
+        mock_project_service: AsyncMock,
     ) -> None:
-        """GET /api/v1/projects/{id}/members is reachable (not 404/405)."""
+        """GET /api/v1/projects/{id}/members returns 200 with member list."""
         client, _db = authed_client
-        response = client.get(f"/api/v1/projects/{PROJECT_ID}/members")
-        # Route exists; may fail on service layer but not as 404/405
-        assert response.status_code not in (404, 405)
+
+        user = CurrentUser(
+            id="test-user-id",
+            email="test@example.com",
+            name="Test User",
+            username="testuser",
+            roles=["owner"],
+        )
+
+        async def _override_with_token() -> tuple[CurrentUser, str]:
+            return user, "test-token"
+
+        app.dependency_overrides[get_current_user_with_token] = _override_with_token
+        try:
+            member = MemberResponse(
+                id=uuid.UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
+                project_id=PROJECT_ID,
+                user_id="test-user-id",
+                role="owner",
+                user=None,
+                created_at=datetime.now(UTC),
+            )
+            mock_project_service.list_members = AsyncMock(
+                return_value=MemberListResponse(items=[member], total=1)
+            )
+
+            response = client.get(f"/api/v1/projects/{PROJECT_ID}/members")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["total"] == 1
+            assert len(data["items"]) == 1
+        finally:
+            app.dependency_overrides.pop(get_current_user_with_token, None)
 
 
 # ---------------------------------------------------------------------------

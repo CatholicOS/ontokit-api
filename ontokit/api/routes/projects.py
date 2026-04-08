@@ -540,6 +540,11 @@ async def _ensure_ontology_loaded(
         if git is not None and git.repository_exists(project_id):
             try:
                 await ontology.load_from_git(project_id, branch, filename, git)
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=str(e),
+                ) from e
             except Exception as e:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

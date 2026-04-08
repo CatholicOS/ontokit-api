@@ -228,6 +228,40 @@ class TestGetHistory:
         assert len(history) >= 1
         assert "Initial import" in history[0].message
 
+    def test_get_history_newest_first(
+        self,
+        initialized_service: BareGitRepositoryService,
+        project_id: uuid.UUID,
+    ) -> None:
+        """get_history returns commits ordered newest-first."""
+        # Create additional commits so we have multiple entries
+        initialized_service.commit_changes(
+            project_id=project_id,
+            ontology_content=b"@prefix : <http://example.org/> .\n:A a :B ; :p 1 .\n",
+            filename="ontology.ttl",
+            message="Second commit",
+            author_name="Test User",
+            author_email="test@example.com",
+        )
+        initialized_service.commit_changes(
+            project_id=project_id,
+            ontology_content=b"@prefix : <http://example.org/> .\n:A a :B ; :p 2 .\n",
+            filename="ontology.ttl",
+            message="Third commit",
+            author_name="Test User",
+            author_email="test@example.com",
+        )
+
+        history = initialized_service.get_history(project_id, limit=10)
+        assert len(history) >= 3
+        # Newest commit first
+        assert "Third commit" in history[0].message
+        assert "Second commit" in history[1].message
+        assert "Initial import" in history[2].message
+        # Timestamps are newest-first
+        assert history[0].timestamp >= history[1].timestamp
+        assert history[1].timestamp >= history[2].timestamp
+
 
 # ---------------------------------------------------------------------------
 # list_branches

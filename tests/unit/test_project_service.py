@@ -491,16 +491,10 @@ class TestTransferOwnership:
         mock_result_project.scalar_one_or_none.return_value = project
         mock_db.execute.return_value = mock_result_project
 
-        # After commit + refresh, list_members is called — mock its DB results
-        mock_members_result = MagicMock()
-        mock_members_result.scalars.return_value.all.return_value = [admin_member, owner_member]
-        mock_count_result = MagicMock()
-        mock_count_result.scalar_one.return_value = 2
-
+        # After commit + refresh, list_members calls _get_project again
         mock_db.execute.side_effect = [
-            mock_result_project,  # _get_project
-            mock_count_result,  # list_members count
-            mock_members_result,  # list_members items
+            mock_result_project,  # _get_project (in transfer_ownership)
+            mock_result_project,  # _get_project (in list_members)
         ]
 
         owner = _make_user(user_id=OWNER_ID)

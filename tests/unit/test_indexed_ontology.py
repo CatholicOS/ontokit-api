@@ -38,11 +38,8 @@ def mock_db() -> AsyncMock:
 def service(mock_ontology_service: AsyncMock, mock_db: AsyncMock) -> IndexedOntologyService:
     """Create an IndexedOntologyService with mocked dependencies."""
     svc = IndexedOntologyService(mock_ontology_service, mock_db)
-    # Replace the real OntologyIndexService created by the constructor with an
-    # AsyncMock test double.  We use object.__setattr__ because
-    # IndexedOntologyService uses __slots__, which prevents normal attribute
-    # assignment for slot-defined attributes after __init__.
-    object.__setattr__(svc, "index", AsyncMock())
+    # Replace the real OntologyIndexService with an AsyncMock for tests.
+    svc.index = AsyncMock()
     return svc
 
 
@@ -52,7 +49,7 @@ class TestShouldUseIndex:
     @pytest.mark.asyncio
     async def test_returns_true_when_index_ready(self, service: IndexedOntologyService) -> None:
         """Returns True when the index reports ready."""
-        object.__setattr__(service.index, "is_index_ready", AsyncMock(return_value=True))
+        service.index.is_index_ready = AsyncMock(return_value=True)  # type: ignore[method-assign]
         result = await service._should_use_index(PROJECT_ID, BRANCH)
         assert result is True
 
@@ -61,16 +58,14 @@ class TestShouldUseIndex:
         self, service: IndexedOntologyService
     ) -> None:
         """Returns False when the index is not ready."""
-        object.__setattr__(service.index, "is_index_ready", AsyncMock(return_value=False))
+        service.index.is_index_ready = AsyncMock(return_value=False)  # type: ignore[method-assign]
         result = await service._should_use_index(PROJECT_ID, BRANCH)
         assert result is False
 
     @pytest.mark.asyncio
     async def test_returns_false_on_exception(self, service: IndexedOntologyService) -> None:
         """Returns False when the index check raises an exception (e.g., table missing)."""
-        object.__setattr__(
-            service.index, "is_index_ready", AsyncMock(side_effect=Exception("table not found"))
-        )
+        service.index.is_index_ready = AsyncMock(side_effect=Exception("table not found"))  # type: ignore[method-assign]
         result = await service._should_use_index(PROJECT_ID, BRANCH)
         assert result is False
 
@@ -85,11 +80,12 @@ class TestGetRootTreeNodesFallback:
         mock_ontology_service: AsyncMock,
     ) -> None:
         """Falls back to OntologyService when index is not ready."""
-        object.__setattr__(service.index, "is_index_ready", AsyncMock(return_value=False))
-        object.__setattr__(service, "_enqueue_reindex_if_stale", AsyncMock())
+        service.index.is_index_ready = AsyncMock(return_value=False)  # type: ignore[method-assign]
+        service._enqueue_reindex_if_stale = AsyncMock()  # type: ignore[method-assign]
 
         await service.get_root_tree_nodes(PROJECT_ID, branch=BRANCH)
         mock_ontology_service.get_root_tree_nodes.assert_awaited_once()
+        service._enqueue_reindex_if_stale.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_uses_index_when_ready(
@@ -98,15 +94,11 @@ class TestGetRootTreeNodesFallback:
         mock_ontology_service: AsyncMock,
     ) -> None:
         """Uses the index when it is ready."""
-        object.__setattr__(service.index, "is_index_ready", AsyncMock(return_value=True))
-        object.__setattr__(
-            service.index,
-            "get_root_classes",
-            AsyncMock(
-                return_value=[
-                    {"iri": CLASS_IRI, "label": "Person", "child_count": 0, "deprecated": False}
-                ]
-            ),
+        service.index.is_index_ready = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        service.index.get_root_classes = AsyncMock(  # type: ignore[method-assign]
+            return_value=[
+                {"iri": CLASS_IRI, "label": "Person", "child_count": 0, "deprecated": False}
+            ]
         )
 
         nodes = await service.get_root_tree_nodes(PROJECT_ID, branch=BRANCH)
@@ -121,16 +113,13 @@ class TestGetRootTreeNodesFallback:
         mock_ontology_service: AsyncMock,
     ) -> None:
         """Falls back to RDFLib when the index query raises an exception."""
-        object.__setattr__(service.index, "is_index_ready", AsyncMock(return_value=True))
-        object.__setattr__(
-            service.index,
-            "get_root_classes",
-            AsyncMock(side_effect=RuntimeError("query failed")),
-        )
-        object.__setattr__(service, "_enqueue_reindex_if_stale", AsyncMock())
+        service.index.is_index_ready = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        service.index.get_root_classes = AsyncMock(side_effect=RuntimeError("query failed"))  # type: ignore[method-assign]
+        service._enqueue_reindex_if_stale = AsyncMock()  # type: ignore[method-assign]
 
         await service.get_root_tree_nodes(PROJECT_ID, branch=BRANCH)
         mock_ontology_service.get_root_tree_nodes.assert_awaited_once()
+        service._enqueue_reindex_if_stale.assert_awaited_once()
 
 
 class TestGetClassCount:
@@ -141,8 +130,8 @@ class TestGetClassCount:
         self, service: IndexedOntologyService, mock_ontology_service: AsyncMock
     ) -> None:
         """Uses the index for class count when ready."""
-        object.__setattr__(service.index, "is_index_ready", AsyncMock(return_value=True))
-        object.__setattr__(service.index, "get_class_count", AsyncMock(return_value=100))
+        service.index.is_index_ready = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        service.index.get_class_count = AsyncMock(return_value=100)  # type: ignore[method-assign]
 
         count = await service.get_class_count(PROJECT_ID, branch=BRANCH)
         assert count == 100
@@ -153,8 +142,8 @@ class TestGetClassCount:
         self, service: IndexedOntologyService, mock_ontology_service: AsyncMock
     ) -> None:
         """Falls back to OntologyService when index is not ready."""
-        object.__setattr__(service.index, "is_index_ready", AsyncMock(return_value=False))
-        object.__setattr__(service, "_enqueue_reindex_if_stale", AsyncMock())
+        service.index.is_index_ready = AsyncMock(return_value=False)  # type: ignore[method-assign]
+        service._enqueue_reindex_if_stale = AsyncMock()  # type: ignore[method-assign]
         mock_ontology_service.get_class_count = AsyncMock(return_value=42)
 
         count = await service.get_class_count(PROJECT_ID, branch=BRANCH)

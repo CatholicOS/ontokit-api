@@ -27,6 +27,12 @@ def _make_project_response(user_role: str = "owner") -> MagicMock:
     return resp
 
 
+def _setup_project_mock(mock_svc: AsyncMock, user_role: str = "owner") -> None:
+    """Configure mock_project_service.get and ._get_project for route tests."""
+    mock_svc.get = AsyncMock(return_value=_make_project_response(user_role))
+    mock_svc._get_project = AsyncMock(return_value=Mock())
+
+
 def _make_norm_run(
     *,
     run_id: UUID | None = None,
@@ -93,8 +99,7 @@ class TestGetNormalizationStatus:
         """Returns cached normalization status."""
         client, _ = authed_client
 
-        mock_project_service.get = AsyncMock(return_value=_make_project_response())
-        mock_project_service._get_project = AsyncMock(return_value=Mock())
+        _setup_project_mock(mock_project_service)
 
         mock_norm_service.get_cached_status = AsyncMock(
             return_value={
@@ -123,8 +128,7 @@ class TestGetNormalizationStatus:
         """Returns None for needs_normalization when never checked."""
         client, _ = authed_client
 
-        mock_project_service.get = AsyncMock(return_value=_make_project_response())
-        mock_project_service._get_project = AsyncMock(return_value=Mock())
+        _setup_project_mock(mock_project_service)
 
         mock_norm_service.get_cached_status = AsyncMock(
             return_value={

@@ -147,7 +147,10 @@ class TestGenerateEmbeddings:
 
         response = client.post(f"/api/v1/projects/{PROJECT_ID}/embeddings/generate")
         assert response.status_code == 202
-        assert "job_id" in response.json()
+        data = response.json()
+        assert "job_id" in data
+        assert data["job_id"] is not None
+        mock_pool.enqueue_job.assert_awaited_once()
 
     @patch("ontokit.api.routes.embeddings.get_git_service")
     @patch("ontokit.api.routes.embeddings._verify_write_access", new_callable=AsyncMock)

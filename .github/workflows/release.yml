@@ -2,7 +2,7 @@ name: Distribution
 
 on:
   push:
-    branches-ignore: [renovate/**]
+    branches: [main, dev]
     tags: [ontokit-*]
   pull_request:
 
