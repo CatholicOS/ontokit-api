@@ -533,3 +533,218 @@ class TestBuildEntityGraphEdgeCases:
         assert result is not None
         animal_nodes = [n for n in result.nodes if n.iri == str(EX.Animal)]
         assert len(animal_nodes) == 1
+
+    @pytest.mark.asyncio
+    async def test_max_nodes_truncates_ancestors(self) -> None:
+        """max_nodes limits ancestor BFS — covers _make_node returning None mid-BFS."""
+        g = Graph()
+        # Deep chain: C0 > C1 > C2 > C3 > C4 (focus)
+        prev = EX.C0
+        g.add((prev, RDF.type, OWL.Class))
+        for i in range(1, 5):
+            uri = URIRef(f"http://example.org/ontology#C{i}")
+            g.add((uri, RDF.type, OWL.Class))
+            g.add((uri, RDFS.subClassOf, prev))
+            prev = uri
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(
+            PROJECT_ID, str(EX.C4), BRANCH, max_nodes=3, ancestors_depth=10
+        )
+        assert result is not None
+        assert len(result.nodes) <= 3
+        assert result.truncated is True
+
+    @pytest.mark.asyncio
+    async def test_max_nodes_truncates_see_also(self) -> None:
+        """max_nodes reached during seeAlso collection — covers seeAlso _make_node None."""
+        g = _base_graph()
+        for i in range(20):
+            uri = URIRef(f"http://example.org/ontology#SA{i}")
+            g.add((uri, RDF.type, OWL.Class))
+            g.add((EX.Person, RDFS.seeAlso, uri))
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(
+            PROJECT_ID,
+            str(EX.Person),
+            BRANCH,
+            max_nodes=5,
+            max_see_also_per_node=20,
+        )
+        assert result is not None
+        assert len(result.nodes) <= 5
+        assert result.truncated is True
+
+    @pytest.mark.asyncio
+    async def test_max_nodes_truncates_see_also_ancestors(self) -> None:
+        """max_nodes reached during seeAlso ancestor BFS."""
+        g = Graph()
+        g.add((EX.Focus, RDF.type, OWL.Class))
+        # seeAlso target with a deep ancestor chain
+        g.add((EX.SATarget, RDF.type, OWL.Class))
+        g.add((EX.Focus, RDFS.seeAlso, EX.SATarget))
+        g.add((EX.SAParent, RDF.type, OWL.Class))
+        g.add((EX.SATarget, RDFS.subClassOf, EX.SAParent))
+        g.add((EX.SAGrandparent, RDF.type, OWL.Class))
+        g.add((EX.SAParent, RDFS.subClassOf, EX.SAGrandparent))
+        svc = _service_with_graph(g)
+        # max_nodes=3 means Focus + SATarget + SAParent; SAGrandparent is truncated
+        result = await svc.build_entity_graph(
+            PROJECT_ID, str(EX.Focus), BRANCH, max_nodes=3, ancestors_depth=10
+        )
+        assert result is not None
+        assert len(result.nodes) <= 3
+        assert result.truncated is True
+
+    @pytest.mark.asyncio
+    async def test_see_also_ancestor_depth_limit(self) -> None:
+        """seeAlso ancestor BFS respects ancestors_depth."""
+        g = _base_graph()
+        g.add((EX.Category, RDF.type, OWL.Class))
+        g.add((EX.Topic, RDF.type, OWL.Class))
+        g.add((EX.Topic, RDFS.subClassOf, EX.Category))
+        g.add((EX.SuperCategory, RDF.type, OWL.Class))
+        g.add((EX.Category, RDFS.subClassOf, EX.SuperCategory))
+        g.add((EX.Person, RDFS.seeAlso, EX.Topic))
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(PROJECT_ID, str(EX.Person), BRANCH, ancestors_depth=1)
+        assert result is not None
+        iris = {n.iri for n in result.nodes}
+        # Topic found via seeAlso, Category via 1-deep ancestor BFS, but SuperCategory is beyond
+        assert str(EX.Topic) in iris
+        assert str(EX.Category) in iris
+        assert str(EX.SuperCategory) not in iris
+
+    @pytest.mark.asyncio
+    async def test_equivalentclass_reverse_direction(self) -> None:
+        """equivalentClass edge uses the reverse direction when IRIs are ordered differently."""
+        g = _base_graph()
+        # Animal < Person alphabetically, so edge goes Animal->Person when Person is first arg
+        # But if we add equivalentClass from Animal to Person, and Animal < Person,
+        # the code checks node_iri < str(equiv) — make sure both directions are exercised
+        g.add((EX.Animal, OWL.equivalentClass, EX.Person))
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(PROJECT_ID, str(EX.Person), BRANCH)
+        assert result is not None
+        equiv_edges = [e for e in result.edges if e.edge_type == "equivalentClass"]
+        assert len(equiv_edges) >= 1
+
+    @pytest.mark.asyncio
+    async def test_disjointwith_forward_direction(self) -> None:
+        """disjointWith edge direction when node_iri < disjoint IRI."""
+        g = _base_graph()
+        # Animal < Student alphabetically
+        g.add((EX.Animal, OWL.disjointWith, EX.Student))
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(PROJECT_ID, str(EX.Person), BRANCH)
+        assert result is not None
+        disj_edges = [e for e in result.edges if e.edge_type == "disjointWith"]
+        assert len(disj_edges) >= 1
+
+    @pytest.mark.asyncio
+    async def test_non_uriref_child_skipped(self) -> None:
+        """BNode children in subClassOf are skipped during descendant BFS."""
+        g = _base_graph()
+        bnode = BNode()
+        g.add((bnode, RDFS.subClassOf, EX.Person))
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(PROJECT_ID, str(EX.Person), BRANCH)
+        assert result is not None
+        # BNode should not appear as a node
+        for node in result.nodes:
+            assert not node.iri.startswith("_:")
+
+    @pytest.mark.asyncio
+    async def test_incoming_see_also_budget_exhausted(self) -> None:
+        """Incoming seeAlso referrers respect max_see_also_per_node budget."""
+        g = _base_graph()
+        for i in range(10):
+            uri = URIRef(f"http://example.org/ontology#Ref{i}")
+            g.add((uri, RDF.type, OWL.Class))
+            g.add((uri, RDFS.seeAlso, EX.Person))
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(
+            PROJECT_ID,
+            str(EX.Person),
+            BRANCH,
+            max_see_also_per_node=2,
+            include_see_also=True,
+        )
+        assert result is not None
+        sa_edges = [e for e in result.edges if e.edge_type == "seeAlso"]
+        assert len(sa_edges) == 2
+
+    @pytest.mark.asyncio
+    async def test_duplicate_see_also_edge_not_counted(self) -> None:
+        """A seeAlso edge to an already-visited node with existing edge doesn't waste budget."""
+        g = _base_graph()
+        # Person seeAlso Animal — Animal is already visited as ancestor
+        g.add((EX.Person, RDFS.seeAlso, EX.Animal))
+        # Also add a genuine seeAlso target
+        g.add((EX.Related, RDF.type, OWL.Class))
+        g.add((EX.Person, RDFS.seeAlso, EX.Related))
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(
+            PROJECT_ID, str(EX.Person), BRANCH, max_see_also_per_node=5
+        )
+        assert result is not None
+        iris = {n.iri for n in result.nodes}
+        assert str(EX.Related) in iris
+
+    @pytest.mark.asyncio
+    async def test_visited_node_reused_in_descendant_diamond(self) -> None:
+        """_make_node returns cached node when a descendant is reachable via two paths."""
+        g = Graph()
+        # Focus has two children A and B; both are parents of Shared
+        g.add((EX.Focus, RDF.type, OWL.Class))
+        g.add((EX.A, RDF.type, OWL.Class))
+        g.add((EX.A, RDFS.subClassOf, EX.Focus))
+        g.add((EX.B, RDF.type, OWL.Class))
+        g.add((EX.B, RDFS.subClassOf, EX.Focus))
+        g.add((EX.Shared, RDF.type, OWL.Class))
+        g.add((EX.Shared, RDFS.subClassOf, EX.A))
+        g.add((EX.Shared, RDFS.subClassOf, EX.B))
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(
+            PROJECT_ID, str(EX.Focus), BRANCH, descendants_depth=3
+        )
+        assert result is not None
+        shared_nodes = [n for n in result.nodes if n.iri == str(EX.Shared)]
+        assert len(shared_nodes) == 1
+
+    @pytest.mark.asyncio
+    async def test_equivalentclass_both_directions(self) -> None:
+        """equivalentClass edges cover both ordering branches."""
+        g = _base_graph()
+        # Add equivalentClass where the lexicographic ordering ensures we hit both branches.
+        # Animal iri < Person iri, so when iterating from Animal: node_iri < str(equiv)
+        # When iterating from Person with equiv=Animal: node_iri > str(equiv) → else branch
+        g.add((EX.Person, OWL.equivalentClass, EX.Animal))
+        g.add((EX.Animal, OWL.equivalentClass, EX.Person))
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(PROJECT_ID, str(EX.Person), BRANCH)
+        assert result is not None
+        equiv_edges = [e for e in result.edges if e.edge_type == "equivalentClass"]
+        # Deduplication means only 1 edge regardless of direction
+        assert len(equiv_edges) == 1
+
+    @pytest.mark.asyncio
+    async def test_max_nodes_truncates_incoming_referrer(self) -> None:
+        """max_nodes reached during incoming seeAlso referrer collection."""
+        g = Graph()
+        g.add((EX.Focus, RDF.type, OWL.Class))
+        # Add many referrers pointing to Focus
+        for i in range(10):
+            uri = URIRef(f"http://example.org/ontology#Ref{i}")
+            g.add((uri, RDF.type, OWL.Class))
+            g.add((uri, RDFS.seeAlso, EX.Focus))
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(
+            PROJECT_ID,
+            str(EX.Focus),
+            BRANCH,
+            max_nodes=3,
+            max_see_also_per_node=20,
+        )
+        assert result is not None
+        assert len(result.nodes) <= 3
+        assert result.truncated is True
