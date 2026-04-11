@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from typing import Literal as TypingLiteral
@@ -494,10 +495,10 @@ class OntologyService:
         _make_node(class_uri, 0)
 
         # BFS upward (ancestors)
-        ancestor_queue: list[tuple[URIRef, int]] = [(class_uri, 0)]
+        ancestor_queue: deque[tuple[URIRef, int]] = deque([(class_uri, 0)])
         ancestor_visited: set[str] = {class_iri}
         while ancestor_queue:
-            current_uri, current_depth = ancestor_queue.pop(0)
+            current_uri, current_depth = ancestor_queue.popleft()
             if current_depth >= ancestors_depth:
                 continue
             for parent in graph.objects(current_uri, RDFS.subClassOf):
@@ -513,10 +514,10 @@ class OntologyService:
                     ancestor_queue.append((parent, current_depth + 1))
 
         # BFS downward (descendants)
-        descendant_queue: list[tuple[URIRef, int]] = [(class_uri, 0)]
+        descendant_queue: deque[tuple[URIRef, int]] = deque([(class_uri, 0)])
         descendant_visited: set[str] = {class_iri}
         while descendant_queue:
-            current_uri, current_depth = descendant_queue.pop(0)
+            current_uri, current_depth = descendant_queue.popleft()
             if current_depth >= descendants_depth:
                 continue
             for child in graph.subjects(RDFS.subClassOf, current_uri):
@@ -634,10 +635,10 @@ class OntologyService:
 
         # BFS upward from seeAlso nodes to their roots
         if see_also_nodes:
-            sa_queue: list[tuple[URIRef, int]] = [(u, 0) for u in see_also_nodes]
+            sa_queue: deque[tuple[URIRef, int]] = deque((u, 0) for u in see_also_nodes)
             sa_visited: set[str] = {str(u) for u in see_also_nodes} | ancestor_visited
             while sa_queue:
-                current_uri, current_depth = sa_queue.pop(0)
+                current_uri, current_depth = sa_queue.popleft()
                 if current_depth >= ancestors_depth:
                     continue
                 for parent in graph.objects(current_uri, RDFS.subClassOf):
