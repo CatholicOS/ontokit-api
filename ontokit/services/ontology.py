@@ -463,15 +463,17 @@ class OntologyService:
             if len(visited) >= max_nodes:
                 return None
             is_focus = uri == class_uri
+            node_type = _classify_node(uri, is_focus, depth)
+            is_root = _is_root_class(uri) if node_type in ("class", "root") else False
             node = GraphNode(
                 id=iri,
                 label=_get_label(uri),
                 iri=iri,
                 definition=_get_definition(uri),
                 is_focus=is_focus,
-                is_root=_is_root_class(uri),
+                is_root=is_root,
                 depth=depth,
-                node_type=_classify_node(uri, is_focus, depth),
+                node_type=node_type,
                 child_count=_child_count(uri),
             )
             visited[iri] = node
