@@ -479,14 +479,15 @@ class OntologyService:
             visited[iri] = node
             return node
 
-        def _add_edge(source: str, target: str, edge_type: str, label: str | None = None) -> None:
+        def _add_edge(source: str, target: str, edge_type: str, label: str | None = None) -> bool:
             eid = f"{source}->{target}:{edge_type}"
             if eid in edge_ids:
-                return
+                return False
             edge_ids.add(eid)
             edges.append(
                 GraphEdge(id=eid, source=source, target=target, edge_type=edge_type, label=label)
             )
+            return True
 
         # Create focus node
         focus_node = _make_node(class_uri, 0)
@@ -614,8 +615,8 @@ class OntologyService:
                         if related_node is None:
                             continue
                         see_also_nodes.append(related)
-                    _add_edge(node_iri, related_iri, "seeAlso", "rdfs:seeAlso")
-                    sa_count += 1
+                    if _add_edge(node_iri, related_iri, "seeAlso", "rdfs:seeAlso"):
+                        sa_count += 1
 
                 # Incoming: only on the focus node to avoid cascade
                 if node_uri == class_uri:
@@ -629,8 +630,8 @@ class OntologyService:
                             if referrer_node is None:
                                 continue
                             see_also_nodes.append(referrer)
-                        _add_edge(referrer_iri, node_iri, "seeAlso", "rdfs:seeAlso")
-                        sa_count += 1
+                        if _add_edge(referrer_iri, node_iri, "seeAlso", "rdfs:seeAlso"):
+                            sa_count += 1
 
         # BFS upward from seeAlso nodes to their roots
         if see_also_nodes:
