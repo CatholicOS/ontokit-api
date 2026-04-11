@@ -364,7 +364,7 @@ class TestBuildEntityGraphSeeAlso:
         )
         assert result is not None
         sa_edges = [e for e in result.edges if e.edge_type == "seeAlso"]
-        assert len(sa_edges) <= 3
+        assert len(sa_edges) == 3
 
 
 class TestBuildEntityGraphClassification:
@@ -378,8 +378,8 @@ class TestBuildEntityGraphClassification:
         result = await svc.build_entity_graph(PROJECT_ID, str(EX.Person), BRANCH)
         assert result is not None
         ext_node = next((n for n in result.nodes if n.iri == str(ext)), None)
-        if ext_node:
-            assert ext_node.node_type == "external"
+        assert ext_node is not None
+        assert ext_node.node_type == "external"
 
     @pytest.mark.asyncio
     async def test_property_classified(self) -> None:
@@ -390,8 +390,8 @@ class TestBuildEntityGraphClassification:
         result = await svc.build_entity_graph(PROJECT_ID, str(EX.Person), BRANCH)
         assert result is not None
         prop_node = next((n for n in result.nodes if n.iri == str(EX.myProp)), None)
-        if prop_node:
-            assert prop_node.node_type == "property"
+        assert prop_node is not None
+        assert prop_node.node_type == "property"
 
     @pytest.mark.asyncio
     async def test_individual_classified(self) -> None:
@@ -402,8 +402,8 @@ class TestBuildEntityGraphClassification:
         result = await svc.build_entity_graph(PROJECT_ID, str(EX.Person), BRANCH)
         assert result is not None
         ind_node = next((n for n in result.nodes if n.iri == str(EX.john)), None)
-        if ind_node:
-            assert ind_node.node_type == "individual"
+        assert ind_node is not None
+        assert ind_node.node_type == "individual"
 
     @pytest.mark.asyncio
     async def test_local_name_fallback_fragment(self) -> None:
