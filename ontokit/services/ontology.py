@@ -1,7 +1,9 @@
 """Ontology service for managing OWL ontologies."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from typing import Literal as TypingLiteral
 from uuid import UUID
 
@@ -32,6 +34,9 @@ from ontokit.schemas.owl_property import (
     OWLPropertyUpdate,
 )
 from ontokit.services.storage import StorageService
+
+if TYPE_CHECKING:
+    from ontokit.schemas.graph import EntityGraphResponse
 
 # Map file extensions to RDF formats
 FORMAT_MAP = {
@@ -122,7 +127,7 @@ class LabelPreference:
     language: str | None  # None means any language or no language tag
 
     @classmethod
-    def parse(cls, pref_string: str) -> "LabelPreference | None":
+    def parse(cls, pref_string: str) -> LabelPreference | None:
         """
         Parse a preference string like 'rdfs:label@en' or 'skos:prefLabel'.
 
@@ -342,17 +347,6 @@ class OntologyService:
         # TODO: Implement class deletion
         raise NotImplementedError("Class deletion pending")
 
-    async def get_class_hierarchy(
-        self,
-        ontology_id: UUID,
-        class_iri: str,
-        direction: str = "both",
-        depth: int = 3,
-    ) -> dict[str, Any]:
-        """Get class hierarchy around a specific class."""
-        # TODO: Implement hierarchy traversal
-        raise NotImplementedError("Hierarchy implementation pending")
-
     async def build_entity_graph(
         self,
         ontology_id: UUID,
@@ -363,7 +357,7 @@ class OntologyService:
         max_nodes: int = 200,
         include_see_also: bool = True,
         max_see_also_per_node: int = 5,
-    ) -> "EntityGraphResponse | None":
+    ) -> EntityGraphResponse | None:
         """Build a multi-hop graph around a class via BFS.
 
         Traverses ancestors (subClassOf upward), descendants (subClassOf downward),
@@ -407,12 +401,13 @@ class OntologyService:
 
         def _is_root_class(uri: URIRef) -> bool:
             parents = [
-                p for p in graph.objects(uri, RDFS.subClassOf)
+                p
+                for p in graph.objects(uri, RDFS.subClassOf)
                 if isinstance(p, URIRef) and p != owl_thing
             ]
             return len(parents) == 0
 
-        def _classify_node(uri: URIRef, is_focus: bool, depth: int) -> str:
+        def _classify_node(uri: URIRef, is_focus: bool, _depth: int) -> str:
             iri = str(uri)
             if is_focus:
                 return "focus"
@@ -421,7 +416,11 @@ class OntologyService:
             # Check if individual (instance, not a class)
             if (uri, RDF.type, OWL.Class) not in graph:
                 for rdf_type in graph.objects(uri, RDF.type):
-                    if rdf_type in (OWL.ObjectProperty, OWL.DatatypeProperty, OWL.AnnotationProperty):
+                    if rdf_type in (
+                        OWL.ObjectProperty,
+                        OWL.DatatypeProperty,
+                        OWL.AnnotationProperty,
+                    ):
                         return "property"
                 return "individual"
             if _is_root_class(uri):
@@ -440,7 +439,8 @@ class OntologyService:
 
         def _child_count(uri: URIRef) -> int:
             return sum(
-                1 for s in graph.subjects(RDFS.subClassOf, uri)
+                1
+                for s in graph.subjects(RDFS.subClassOf, uri)
                 if isinstance(s, URIRef) and (s, RDF.type, OWL.Class) in graph
             )
 
@@ -451,7 +451,7 @@ class OntologyService:
             total_discovered[0] += 1
             if len(visited) >= max_nodes:
                 return None
-            is_focus = (uri == class_uri)
+            is_focus = uri == class_uri
             node = GraphNode(
                 id=iri,
                 label=_get_label(uri),
@@ -471,7 +471,9 @@ class OntologyService:
             if eid in edge_ids:
                 return
             edge_ids.add(eid)
-            edges.append(GraphEdge(id=eid, source=source, target=target, edge_type=edge_type, label=label))
+            edges.append(
+                GraphEdge(id=eid, source=source, target=target, edge_type=edge_type, label=label)
+            )
 
         # Create focus node
         focus_node = _make_node(class_uri, 0)
