@@ -428,6 +428,79 @@ class TestBuildEntityGraphClassification:
         assert result.focus_label == "SlashClass"
 
 
+class TestBuildEntityGraphValidation:
+    @pytest.mark.asyncio
+    async def test_max_nodes_zero_raises(self) -> None:
+        svc = _service_with_graph(_base_graph())
+        with pytest.raises(ValueError, match="max_nodes must be at least 1"):
+            await svc.build_entity_graph(PROJECT_ID, str(EX.Person), BRANCH, max_nodes=0)
+
+    @pytest.mark.asyncio
+    async def test_negative_ancestors_depth_raises(self) -> None:
+        svc = _service_with_graph(_base_graph())
+        with pytest.raises(ValueError, match="ancestors_depth must be non-negative"):
+            await svc.build_entity_graph(PROJECT_ID, str(EX.Person), BRANCH, ancestors_depth=-1)
+
+    @pytest.mark.asyncio
+    async def test_negative_descendants_depth_raises(self) -> None:
+        svc = _service_with_graph(_base_graph())
+        with pytest.raises(ValueError, match="descendants_depth must be non-negative"):
+            await svc.build_entity_graph(PROJECT_ID, str(EX.Person), BRANCH, descendants_depth=-1)
+
+    @pytest.mark.asyncio
+    async def test_negative_max_see_also_per_node_raises(self) -> None:
+        svc = _service_with_graph(_base_graph())
+        with pytest.raises(ValueError, match="max_see_also_per_node must be non-negative"):
+            await svc.build_entity_graph(
+                PROJECT_ID, str(EX.Person), BRANCH, max_see_also_per_node=-1
+            )
+
+    @pytest.mark.asyncio
+    async def test_non_bool_include_see_also_raises(self) -> None:
+        svc = _service_with_graph(_base_graph())
+        with pytest.raises(ValueError, match="include_see_also must be a boolean"):
+            await svc.build_entity_graph(
+                PROJECT_ID,
+                str(EX.Person),
+                BRANCH,
+                include_see_also="yes",  # type: ignore[arg-type]
+            )
+
+
+class TestBuildEntityGraphIncomingRestrictions:
+    @pytest.mark.asyncio
+    async def test_incoming_restriction_all_values_from(self) -> None:
+        """Reverse seeAlso via OWL restriction (allValuesFrom -> focus)."""
+        g = _base_graph()
+        g.add((EX.Referrer, RDF.type, OWL.Class))
+        restriction = BNode()
+        g.add((restriction, RDF.type, OWL.Restriction))
+        g.add((restriction, OWL.onProperty, RDFS.seeAlso))
+        g.add((restriction, OWL.allValuesFrom, EX.Person))
+        g.add((EX.Referrer, RDFS.subClassOf, restriction))
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(PROJECT_ID, str(EX.Person), BRANCH)
+        assert result is not None
+        iris = {n.iri for n in result.nodes}
+        assert str(EX.Referrer) in iris
+
+    @pytest.mark.asyncio
+    async def test_incoming_restriction_has_value(self) -> None:
+        """Reverse seeAlso via OWL restriction (hasValue -> focus)."""
+        g = _base_graph()
+        g.add((EX.Referrer, RDF.type, OWL.Class))
+        restriction = BNode()
+        g.add((restriction, RDF.type, OWL.Restriction))
+        g.add((restriction, OWL.onProperty, RDFS.seeAlso))
+        g.add((restriction, OWL.hasValue, EX.Person))
+        g.add((EX.Referrer, RDFS.subClassOf, restriction))
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(PROJECT_ID, str(EX.Person), BRANCH)
+        assert result is not None
+        iris = {n.iri for n in result.nodes}
+        assert str(EX.Referrer) in iris
+
+
 class TestBuildEntityGraphEdgeCases:
     @pytest.mark.asyncio
     async def test_owl_thing_parent_skipped(self) -> None:
