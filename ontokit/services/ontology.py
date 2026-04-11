@@ -582,13 +582,14 @@ class OntologyService:
             for subj in graph.subjects(RDFS.seeAlso, uri):
                 if isinstance(subj, URIRef):
                     referrers.append(subj)
-            # Find restrictions that someValuesFrom -> uri
-            for restriction in graph.subjects(OWL.someValuesFrom, uri):
-                on_prop = next(graph.objects(restriction, OWL.onProperty), None)
-                if on_prop == RDFS.seeAlso:
-                    for cls in graph.subjects(RDFS.subClassOf, restriction):
-                        if isinstance(cls, URIRef) and (cls, RDF.type, OWL.Class) in graph:
-                            referrers.append(cls)
+            # Find restrictions that reference uri via someValuesFrom/allValuesFrom/hasValue
+            for predicate in (OWL.someValuesFrom, OWL.allValuesFrom, OWL.hasValue):
+                for restriction in graph.subjects(predicate, uri):
+                    on_prop = next(graph.objects(restriction, OWL.onProperty), None)
+                    if on_prop == RDFS.seeAlso:
+                        for cls in graph.subjects(RDFS.subClassOf, restriction):
+                            if isinstance(cls, URIRef) and (cls, RDF.type, OWL.Class) in graph:
+                                referrers.append(cls)
             return referrers
 
         # Collect seeAlso cross-links
