@@ -489,10 +489,9 @@ class OntologyService:
             )
             return True
 
-        # Create focus node
-        focus_node = _make_node(class_uri, 0)
-        if not focus_node:
-            return None
+        # Create focus node — always succeeds: class existence is verified above
+        # and visited dict is empty so max_nodes cannot be exceeded.
+        _make_node(class_uri, 0)
 
         # BFS upward (ancestors)
         ancestor_queue: list[tuple[URIRef, int]] = [(class_uri, 0)]
