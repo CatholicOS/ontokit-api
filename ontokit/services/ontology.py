@@ -364,6 +364,17 @@ class OntologyService:
         and optional seeAlso cross-links. Returns nodes with lineage-based types
         for ontology-agnostic coloring.
         """
+        if max_nodes < 1:
+            raise ValueError("max_nodes must be at least 1")
+        if ancestors_depth < 0:
+            raise ValueError("ancestors_depth must be non-negative")
+        if descendants_depth < 0:
+            raise ValueError("descendants_depth must be non-negative")
+        if max_see_also_per_node < 0:
+            raise ValueError("max_see_also_per_node must be non-negative")
+        if not isinstance(include_see_also, bool):
+            raise ValueError("include_see_also must be a boolean")
+
         from ontokit.schemas.graph import EntityGraphResponse, GraphEdge, GraphNode
 
         graph = await self._get_graph(ontology_id, branch)
