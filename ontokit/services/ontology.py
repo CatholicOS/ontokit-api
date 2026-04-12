@@ -456,11 +456,15 @@ class OntologyService:
                 if isinstance(s, URIRef) and (s, RDF.type, OWL.Class) in graph
             )
 
+        seen: set[str] = set()
+
         def _make_node(uri: URIRef, depth: int) -> GraphNode | None:
             iri = str(uri)
             if iri in visited:
                 return visited[iri]
-            total_discovered[0] += 1
+            if iri not in seen:
+                seen.add(iri)
+                total_discovered[0] += 1
             if len(visited) >= max_nodes:
                 return None
             is_focus = uri == class_uri
@@ -614,7 +618,10 @@ class OntologyService:
                         related_node = _make_node(related, 0)
                         if related_node is None:
                             continue
-                        see_also_nodes.append(related)
+                    # Always enqueue for ancestor traversal so seeAlso targets
+                    # that were already visited (e.g. as descendants) still get
+                    # their own ancestor branch explored.
+                    see_also_nodes.append(related)
                     if _add_edge(node_iri, related_iri, "seeAlso", "rdfs:seeAlso"):
                         sa_count += 1
 
@@ -629,7 +636,7 @@ class OntologyService:
                             referrer_node = _make_node(referrer, 0)
                             if referrer_node is None:
                                 continue
-                            see_also_nodes.append(referrer)
+                        see_also_nodes.append(referrer)
                         if _add_edge(referrer_iri, node_iri, "seeAlso", "rdfs:seeAlso"):
                             sa_count += 1
 
