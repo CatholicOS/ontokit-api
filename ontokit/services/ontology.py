@@ -65,6 +65,16 @@ LABEL_PROPERTY_MAP = {
 # Default label preferences if none specified
 DEFAULT_LABEL_PREFERENCES = ["rdfs:label@en", "rdfs:label", "skos:prefLabel@en", "skos:prefLabel"]
 
+# Namespaces treated as external (not part of the ontology being edited)
+EXTERNAL_NAMESPACES = (
+    "http://www.w3.org/2000/01/rdf-schema#",
+    "http://www.w3.org/2002/07/owl#",
+    "http://xmlns.com/foaf/0.1/",
+    "http://purl.org/dc/elements/1.1/",
+    "http://purl.org/dc/terms/",
+    "http://www.w3.org/2004/02/skos/core#",
+)
+
 # Common annotation properties to extract for class details
 # (excludes rdfs:label and rdfs:comment which are handled separately)
 ANNOTATION_PROPERTIES = {
@@ -385,14 +395,6 @@ class OntologyService:
             return None
 
         owl_thing = OWL.Thing
-        EXTERNAL_NAMESPACES = (
-            "http://www.w3.org/2000/01/rdf-schema#",
-            "http://www.w3.org/2002/07/owl#",
-            "http://xmlns.com/foaf/0.1/",
-            "http://purl.org/dc/elements/1.1/",
-            "http://purl.org/dc/terms/",
-            "http://www.w3.org/2004/02/skos/core#",
-        )
 
         visited: dict[str, GraphNode] = {}
         edges: list[GraphEdge] = []
@@ -559,11 +561,18 @@ class OntologyService:
             FOLIO encodes seeAlso as owl:Restriction with owl:someValuesFrom
             inside rdfs:subClassOf, not as direct rdfs:seeAlso triples.
             """
+            seen: set[URIRef] = set()
             targets: list[URIRef] = []
+
+            def _add(ref: URIRef) -> None:
+                if ref not in seen:
+                    seen.add(ref)
+                    targets.append(ref)
+
             # Direct rdfs:seeAlso triples
             for obj in graph.objects(uri, RDFS.seeAlso):
                 if isinstance(obj, URIRef):
-                    targets.append(obj)
+                    _add(obj)
             # OWL restrictions: subClassOf -> Restriction(onProperty=seeAlso, someValuesFrom=X)
             for sc in graph.objects(uri, RDFS.subClassOf):
                 if isinstance(sc, URIRef):
@@ -573,22 +582,29 @@ class OntologyService:
                 if on_prop == RDFS.seeAlso:
                     for val in graph.objects(sc, OWL.someValuesFrom):
                         if isinstance(val, URIRef):
-                            targets.append(val)
+                            _add(val)
                     for val in graph.objects(sc, OWL.allValuesFrom):
                         if isinstance(val, URIRef):
-                            targets.append(val)
+                            _add(val)
                     for val in graph.objects(sc, OWL.hasValue):
                         if isinstance(val, URIRef):
-                            targets.append(val)
+                            _add(val)
             return targets
 
         def _get_see_also_referrers(uri: URIRef) -> list[URIRef]:
             """Find classes that have seeAlso restrictions pointing TO this URI."""
+            seen: set[URIRef] = set()
             referrers: list[URIRef] = []
+
+            def _add(ref: URIRef) -> None:
+                if ref not in seen:
+                    seen.add(ref)
+                    referrers.append(ref)
+
             # Direct reverse rdfs:seeAlso
             for subj in graph.subjects(RDFS.seeAlso, uri):
                 if isinstance(subj, URIRef):
-                    referrers.append(subj)
+                    _add(subj)
             # Find restrictions that reference uri via someValuesFrom/allValuesFrom/hasValue
             for predicate in (OWL.someValuesFrom, OWL.allValuesFrom, OWL.hasValue):
                 for restriction in graph.subjects(predicate, uri):
@@ -596,7 +612,7 @@ class OntologyService:
                     if on_prop == RDFS.seeAlso:
                         for cls in graph.subjects(RDFS.subClassOf, restriction):
                             if isinstance(cls, URIRef) and (cls, RDF.type, OWL.Class) in graph:
-                                referrers.append(cls)
+                                _add(cls)
             return referrers
 
         # Collect seeAlso cross-links
