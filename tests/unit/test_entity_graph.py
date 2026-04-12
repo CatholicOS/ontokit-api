@@ -675,20 +675,27 @@ class TestBuildEntityGraphEdgeCases:
 
     @pytest.mark.asyncio
     async def test_duplicate_see_also_edge_not_counted(self) -> None:
-        """A seeAlso edge to an already-visited node with existing edge doesn't waste budget."""
+        """Duplicate seeAlso edge doesn't consume budget, leaving room for other targets."""
         g = _base_graph()
-        # Person seeAlso Animal — Animal is already visited as ancestor
-        g.add((EX.Person, RDFS.seeAlso, EX.Animal))
-        # Also add a genuine seeAlso target
-        g.add((EX.Related, RDF.type, OWL.Class))
-        g.add((EX.Person, RDFS.seeAlso, EX.Related))
+        # Animal (ancestor of Person) also has seeAlso to the same target as Person,
+        # so when we iterate visited nodes, both Person and Animal try to add
+        # a seeAlso edge to EX.Shared. The second _add_edge returns False (duplicate)
+        # and should not consume the budget.
+        g.add((EX.Shared, RDF.type, OWL.Class))
+        g.add((EX.Person, RDFS.seeAlso, EX.Shared))
+        g.add((EX.Animal, RDFS.seeAlso, EX.Shared))
+        # Add a second target only reachable from Animal — if the duplicate edge
+        # to Shared wrongly consumed Animal's budget, this one would be blocked.
+        g.add((EX.Other, RDF.type, OWL.Class))
+        g.add((EX.Animal, RDFS.seeAlso, EX.Other))
         svc = _service_with_graph(g)
         result = await svc.build_entity_graph(
-            PROJECT_ID, str(EX.Person), BRANCH, max_see_also_per_node=5
+            PROJECT_ID, str(EX.Person), BRANCH, max_see_also_per_node=2
         )
         assert result is not None
         iris = {n.iri for n in result.nodes}
-        assert str(EX.Related) in iris
+        assert str(EX.Shared) in iris
+        assert str(EX.Other) in iris
 
     @pytest.mark.asyncio
     async def test_visited_node_reused_in_descendant_diamond(self) -> None:
