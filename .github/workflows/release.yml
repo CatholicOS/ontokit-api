@@ -135,7 +135,7 @@ jobs:
             type=semver,pattern={{version}},value=${{ github.ref_name }},prefix=
             type=semver,pattern={{major}}.{{minor}},value=${{ github.ref_name }},prefix=
             type=raw,value=latest
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.prod
