@@ -14,7 +14,14 @@ _models: dict[str, object] = {}
 def _get_model(model_name: str) -> object:
     """Get or load a sentence-transformers model (cached)."""
     if model_name not in _models:
-        from sentence_transformers import SentenceTransformer
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as exc:
+            raise RuntimeError(
+                "The local embedding provider requires 'sentence-transformers'. "
+                "Install it with: pip install 'ontokit[local-embeddings]' "
+                "(or choose the 'openai' or 'voyage' provider instead)."
+            ) from exc
 
         logger.info(f"Loading sentence-transformers model: {model_name}")
         _models[model_name] = SentenceTransformer(model_name)
