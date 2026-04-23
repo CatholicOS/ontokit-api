@@ -107,6 +107,8 @@ class TestUpdateConfig:
         self, service: EmbeddingService, mock_db: AsyncMock
     ) -> None:
         """Creates a new ProjectEmbeddingConfig when none exists."""
+        from unittest.mock import patch
+
         result = MagicMock()
         result.scalar_one_or_none.return_value = None
         mock_db.execute.return_value = result
@@ -118,7 +120,13 @@ class TestUpdateConfig:
         update.api_key = None
         update.auto_embed_on_save = True
 
-        await service.update_config(PROJECT_ID, update)
+        mock_provider = MagicMock()
+        mock_provider.dimensions = 384
+        with patch(
+            "ontokit.services.embedding_service.get_embedding_provider",
+            return_value=mock_provider,
+        ):
+            await service.update_config(PROJECT_ID, update)
         mock_db.add.assert_called_once()
         added = mock_db.add.call_args[0][0]
         assert added.auto_embed_on_save is True

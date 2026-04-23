@@ -116,6 +116,12 @@ init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
 
+# sentence-transformers is an optional extra ([local-embeddings]); it won't be
+# present in the default environment, so mypy should not fail on the import.
+[[tool.mypy.overrides]]
+module = ["sentence_transformers"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
