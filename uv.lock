@@ -1521,11 +1521,15 @@ dependencies = [
     { name = "python-multipart" },
     { name = "rdflib" },
     { name = "redis" },
-    { name = "sentence-transformers" },
     { name = "slowapi" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "websockets" },
+]
+
+[package.optional-dependencies]
+local-embeddings = [
+    { name = "sentence-transformers" },
 ]
 
 [package.dev-dependencies]
@@ -1562,12 +1566,13 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.26" },
     { name = "rdflib", specifier = ">=7.1.0" },
     { name = "redis", specifier = ">=5.2.0" },
-    { name = "sentence-transformers", specifier = ">=5.4.0" },
+    { name = "sentence-transformers", marker = "extra == 'local-embeddings'", specifier = ">=5.4.0" },
     { name = "slowapi", specifier = ">=0.1.9" },
     { name = "sqlalchemy", specifier = ">=2.0.49" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.44.0" },
     { name = "websockets", specifier = ">=14.0" },
 ]
+provides-extras = ["local-embeddings"]
 
 [package.metadata.requires-dev]
 dev = [

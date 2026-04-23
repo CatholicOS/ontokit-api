@@ -20,7 +20,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /build
 COPY pyproject.toml README.md ./
-COPY ontokit/version.py ./ontokit/version.py
+COPY ontokit/ ./ontokit/
 RUN pip install --upgrade pip && \
     pip install .
 
@@ -50,7 +50,8 @@ COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /home/ontokit/app
 
-COPY --chown=ontokit:ontokit ontokit/ ./ontokit/
+# The ontokit package is already installed in /opt/venv by the builder stage,
+# so we only need the alembic migration files in the workdir at runtime.
 COPY --chown=ontokit:ontokit alembic.ini ./
 COPY --chown=ontokit:ontokit alembic/ ./alembic/
 COPY --chown=ontokit:ontokit scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
