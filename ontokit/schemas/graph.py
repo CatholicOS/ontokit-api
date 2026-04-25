@@ -2,7 +2,29 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel
+
+# Node type values produced by the BFS in `OntologyService.build_entity_graph`.
+# Frontend mirror: `GraphNodeType` in `lib/graph/types.ts`.
+GraphNodeType = Literal[
+    "focus",
+    "root",
+    "secondary_root",
+    "class",
+    "individual",
+    "property",
+    "external",
+]
+
+# Edge type values produced by the BFS. Frontend mirror: `GraphEdgeType`.
+GraphEdgeType = Literal[
+    "subClassOf",
+    "equivalentClass",
+    "disjointWith",
+    "seeAlso",
+]
 
 
 class GraphNode(BaseModel):
@@ -15,7 +37,7 @@ class GraphNode(BaseModel):
     is_focus: bool = False
     is_root: bool = False
     depth: int = 0
-    node_type: str = "class"
+    node_type: GraphNodeType = "class"
     child_count: int | None = None
 
 
@@ -25,7 +47,7 @@ class GraphEdge(BaseModel):
     id: str
     source: str
     target: str
-    edge_type: str
+    edge_type: GraphEdgeType
     label: str | None = None
 
 
