@@ -332,6 +332,23 @@ class TestUpdateLintConfig:
         )
         assert response.status_code == 422
 
+    def test_lint_level_and_enabled_rules_together_rejected(
+        self,
+        authed_client: tuple[TestClient, AsyncMock],
+    ) -> None:
+        """Setting both lint_level and enabled_rules is contradictory and must be
+        rejected. Presets are immutable, so the two modes are mutually exclusive."""
+        client, _ = authed_client
+
+        response = client.put(
+            f"/api/v1/projects/{PROJECT_ID}/lint/config",
+            json={"lint_level": 3, "enabled_rules": ["missing-label"]},
+        )
+        assert response.status_code == 422
+        body = response.json()
+        # Confirm the error is the XOR validator, not unrelated noise.
+        assert "mutually exclusive" in str(body).lower()
+
     @patch("ontokit.api.routes.lint.verify_project_access", new_callable=AsyncMock)
     def test_update_existing_config(
         self,
@@ -535,3 +552,199 @@ class TestLinterWithConfig:
         assert "missing-label" in rule_ids
         assert "orphan-class" not in rule_ids
         assert "missing-comment" not in rule_ids
+
+    async def test_empty_enabled_rules_disables_linting(self) -> None:
+        """An explicit empty rule set must disable linting completely.
+
+        End-to-end check on the path: PUT enabled_rules=[] persists "" in the
+        DB → ProjectLintConfig.get_enabled_rule_ids() returns set() → worker
+        passes set() to get_linter() → linter produces 0 issues.
+
+        Without this, the empty-set semantics are only proved at the model
+        layer; the worker could silently fall back to "all rules" and the
+        bug wouldn't surface in unit tests.
+        """
+        from rdflib import Graph, Namespace
+        from rdflib.namespace import OWL, RDF, RDFS
+
+        EX = Namespace("http://example.org/")
+        g = Graph()
+        # A graph that would normally fire many rules: orphan, no label,
+        # no comment, undefined parent, etc.
+        g.add((EX.Orphan, RDF.type, OWL.Class))
+        g.add((EX.Bad, RDF.type, OWL.Class))
+        g.add((EX.Bad, RDFS.subClassOf, EX.UndefinedParent))
+
+        # Simulate the resolution chain: model → set() → worker → linter
+        config = ProjectLintConfig()
+        config.enabled_rules = ""  # PUT with enabled_rules=[]
+        config.lint_level = None
+        rules = ProjectLintConfig.get_enabled_rule_ids(config)
+        assert rules == set(), "model must resolve empty string to empty set"
+
+        linter = get_linter(enabled_rules=rules)
+        issues = await linter.lint(g, uuid4())
+        assert issues == [], "empty rule set must produce zero issues"
+
+
+# ---------------------------------------------------------------------------
+# 7. Auth gating: require_manage and require_write
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyProjectAccess:
+    """Direct unit tests for verify_project_access role gating.
+
+    Existing route tests mock verify_project_access entirely, so the new
+    require_manage parameter introduced by this PR is otherwise untested.
+    Editor and viewer must be rejected; admin and owner must pass.
+    """
+
+    @pytest.fixture
+    def mock_db(self) -> AsyncMock:
+        session = AsyncMock()
+        # Project lookup returns a real-looking object
+        project = SimpleNamespace(id=uuid4())
+        execute_result = MagicMock()
+        execute_result.scalar_one_or_none.return_value = project
+        session.execute = AsyncMock(return_value=execute_result)
+        return session
+
+    async def _call_with_role(
+        self,
+        mock_db: AsyncMock,
+        role: str | None,
+        *,
+        require_manage: bool = False,
+        require_write: bool = False,
+    ) -> object:
+        from ontokit.api.routes.lint import verify_project_access
+        from ontokit.core.auth import CurrentUser
+
+        user = CurrentUser(id="u1", email="u@example.com", name="U", username="u", roles=[])
+
+        # Mock get_project_service to return a service whose .get yields
+        # a project_response with the requested user_role.
+        with patch("ontokit.api.routes.lint.get_project_service") as mock_factory:
+            service = AsyncMock()
+            service.get = AsyncMock(return_value=SimpleNamespace(user_role=role))
+            mock_factory.return_value = service
+
+            return await verify_project_access(
+                project_id=uuid4(),
+                db=mock_db,
+                user=user,
+                require_write=require_write,
+                require_manage=require_manage,
+            )
+
+    @pytest.mark.parametrize("role", ["owner", "admin"])
+    async def test_require_manage_allows_owner_and_admin(
+        self, mock_db: AsyncMock, role: str
+    ) -> None:
+        """Owner and admin pass require_manage gating."""
+        result = await self._call_with_role(mock_db, role, require_manage=True)
+        assert result is not None  # returns the Project model
+
+    @pytest.mark.parametrize("role", ["editor", "suggester", "viewer", None])
+    async def test_require_manage_rejects_non_admins(
+        self, mock_db: AsyncMock, role: str | None
+    ) -> None:
+        """Editor, suggester, viewer, and no-role users are rejected with 403."""
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            await self._call_with_role(mock_db, role, require_manage=True)
+        assert exc_info.value.status_code == 403
+        assert "admin" in exc_info.value.detail.lower()
+
+    @pytest.mark.parametrize("role", ["owner", "admin", "editor"])
+    async def test_require_write_allows_writers(self, mock_db: AsyncMock, role: str) -> None:
+        """Owner, admin, and editor pass require_write gating."""
+        result = await self._call_with_role(mock_db, role, require_write=True)
+        assert result is not None
+
+    @pytest.mark.parametrize("role", ["suggester", "viewer", None])
+    async def test_require_write_rejects_non_writers(
+        self, mock_db: AsyncMock, role: str | None
+    ) -> None:
+        """Suggester, viewer, and no-role are rejected by require_write."""
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            await self._call_with_role(mock_db, role, require_write=True)
+        assert exc_info.value.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# 8. Clear lint results endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestClearLintResults:
+    """Tests for DELETE /api/v1/projects/{id}/lint/results.
+
+    This is a destructive admin-only endpoint that this PR introduces with
+    zero coverage. We test happy-path 204 and that the auth gate is wired
+    through with require_manage=True.
+    """
+
+    @patch("ontokit.api.routes.lint.verify_project_access", new_callable=AsyncMock)
+    def test_clear_succeeds_for_admin(
+        self,
+        mock_access: AsyncMock,
+        authed_client: tuple[TestClient, AsyncMock],
+    ) -> None:
+        """Successful clear returns 204 and issues a DELETE on lint_runs."""
+        client, mock_session = authed_client
+        mock_access.return_value = Mock()
+
+        response = client.delete(f"/api/v1/projects/{PROJECT_ID}/lint/results")
+
+        assert response.status_code == 204
+        # Ensure the auth check requested manage-level access.
+        assert mock_access.call_args.kwargs.get("require_manage") is True
+        # Ensure a DELETE statement was executed against the DB.
+        assert mock_session.execute.await_count >= 1
+        mock_session.commit.assert_awaited()
+
+    @patch("ontokit.api.routes.lint.verify_project_access", new_callable=AsyncMock)
+    def test_clear_propagates_403_from_auth(
+        self,
+        mock_access: AsyncMock,
+        authed_client: tuple[TestClient, AsyncMock],
+    ) -> None:
+        """When verify_project_access raises 403, the route returns 403 and
+        does not commit any deletes."""
+        from fastapi import HTTPException
+
+        client, mock_session = authed_client
+        mock_access.side_effect = HTTPException(status_code=403, detail="Admin access required")
+
+        response = client.delete(f"/api/v1/projects/{PROJECT_ID}/lint/results")
+
+        assert response.status_code == 403
+        mock_session.commit.assert_not_awaited()
+
+    def test_clear_requires_authentication(self) -> None:
+        """Unauthenticated callers cannot clear lint results."""
+        from ontokit.core.auth import get_current_user
+        from ontokit.core.database import get_db
+        from ontokit.main import app
+
+        async def _no_user() -> None:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=401, detail="Not authenticated")
+
+        async def _no_db():  # type: ignore[no-untyped-def]
+            yield AsyncMock()
+
+        app.dependency_overrides[get_current_user] = _no_user
+        app.dependency_overrides[get_db] = _no_db
+        try:
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.delete(f"/api/v1/projects/{PROJECT_ID}/lint/results")
+            assert response.status_code == 401
+        finally:
+            app.dependency_overrides.clear()
