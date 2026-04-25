@@ -652,7 +652,9 @@ async def get_ontology_class_graph(
     Returns nodes and edges for visualization, with lineage-based node types.
     """
     resolved_branch = branch or git.get_default_branch(project_id)
-    await _ensure_ontology_loaded(project_id, service, ontology, user, resolved_branch, git)
+    project = await _ensure_ontology_loaded(
+        project_id, service, ontology, user, resolved_branch, git
+    )
 
     result = await ontology.build_entity_graph(
         project_id,
@@ -662,6 +664,7 @@ async def get_ontology_class_graph(
         descendants_depth=descendants_depth,
         max_nodes=max_nodes,
         include_see_also=include_see_also,
+        label_preferences=project.label_preferences,
     )
     if result is None:
         raise HTTPException(
