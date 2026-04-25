@@ -18,7 +18,13 @@ depends_on = None
 
 def upgrade() -> None:
     op.add_column("lint_issues", sa.Column("subject_type", sa.String(length=50), nullable=True))
+    op.create_check_constraint(
+        "ck_lint_issues_subject_type",
+        "lint_issues",
+        "subject_type IS NULL OR subject_type IN ('class', 'property', 'individual', 'other')",
+    )
 
 
 def downgrade() -> None:
+    op.drop_constraint("ck_lint_issues_subject_type", "lint_issues", type_="check")
     op.drop_column("lint_issues", "subject_type")

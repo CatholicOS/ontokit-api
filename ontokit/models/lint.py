@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 if TYPE_CHECKING:
@@ -58,6 +58,12 @@ class LintIssue(Base):
     """Lint issue model for storing individual issues found during linting."""
 
     __tablename__ = "lint_issues"
+    __table_args__ = (
+        CheckConstraint(
+            "subject_type IS NULL OR subject_type IN ('class', 'property', 'individual', 'other')",
+            name="ck_lint_issues_subject_type",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("lint_runs.id", ondelete="CASCADE"))
