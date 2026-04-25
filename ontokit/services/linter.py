@@ -584,7 +584,11 @@ class OntologyLinter:
 
                 for label in graph.objects(subject, predicate):
                     if isinstance(label, RDFLiteral):
-                        labels_by_lang[label.language].append(str(label))
+                        # Normalize language tag to lowercase for case-insensitive
+                        # comparison (BCP-47: tags are case-insensitive). Matches the
+                        # normalization used by `redundant-regional-label`.
+                        lang_key = label.language.lower() if label.language else None
+                        labels_by_lang[lang_key].append(str(label))
 
                 # Check for multiple different labels per language within this predicate
                 for lang, label_values in labels_by_lang.items():

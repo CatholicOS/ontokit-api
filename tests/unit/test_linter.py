@@ -391,6 +391,22 @@ async def test_label_per_language_no_issue_when_same() -> None:
     assert len(matches) == 0
 
 
+async def test_label_per_language_case_insensitive_lang_tag() -> None:
+    """BCP-47 says language tags are case-insensitive — @en-US and @en-us are the
+    same language and conflicting labels under those tags must be flagged."""
+    g = Graph()
+    g.add((EX.Animal, RDF.type, OWL.Class))
+    g.add((EX.Animal, RDFS.label, Literal("Apple", lang="en-US")))
+    g.add((EX.Animal, RDFS.label, Literal("Banana", lang="en-us")))
+
+    linter = OntologyLinter(enabled_rules={"label-per-language"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "label-per-language")
+    assert len(matches) == 1
+    assert matches[0].subject_iri == str(EX.Animal)
+
+
 # ---------------------------------------------------------------------------
 # 13. domain-violation
 # ---------------------------------------------------------------------------
