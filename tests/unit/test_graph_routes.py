@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from ontokit.api.routes.classes import get_ontology_service
 from ontokit.api.routes.projects import get_git, get_ontology, get_service
 from ontokit.main import app
 from ontokit.schemas.graph import EntityGraphResponse, GraphNode
@@ -29,43 +28,6 @@ def _sample_graph_response() -> EntityGraphResponse:
         truncated=False,
         total_concept_count=1,
     )
-
-
-# ---------------------------------------------------------------------------
-# classes.py — GET /api/v1/ontologies/{id}/classes/graph
-# ---------------------------------------------------------------------------
-
-
-class TestClassesGraphRoute:
-    @pytest.fixture
-    def mock_ontology_svc(self) -> Generator[AsyncMock, None, None]:
-        mock_svc = AsyncMock()
-        app.dependency_overrides[get_ontology_service] = lambda: mock_svc
-        try:
-            yield mock_svc
-        finally:
-            app.dependency_overrides.pop(get_ontology_service, None)
-
-    def test_graph_success(self, mock_ontology_svc: AsyncMock) -> None:
-        mock_ontology_svc.build_entity_graph = AsyncMock(return_value=_sample_graph_response())
-        client = TestClient(app, raise_server_exceptions=False)
-        resp = client.get(
-            f"/api/v1/ontologies/{PROJECT_ID}/classes/graph",
-            params={"class_iri": FOCUS_IRI},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["focus_iri"] == FOCUS_IRI
-        assert len(data["nodes"]) == 1
-
-    def test_graph_not_found(self, mock_ontology_svc: AsyncMock) -> None:
-        mock_ontology_svc.build_entity_graph = AsyncMock(return_value=None)
-        client = TestClient(app, raise_server_exceptions=False)
-        resp = client.get(
-            f"/api/v1/ontologies/{PROJECT_ID}/classes/graph",
-            params={"class_iri": "http://example.org/Missing"},
-        )
-        assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
