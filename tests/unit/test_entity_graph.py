@@ -455,17 +455,6 @@ class TestBuildEntityGraphValidation:
                 PROJECT_ID, str(EX.Person), BRANCH, max_see_also_per_node=-1
             )
 
-    @pytest.mark.asyncio
-    async def test_non_bool_include_see_also_raises(self) -> None:
-        svc = _service_with_graph(_base_graph())
-        with pytest.raises(ValueError, match="include_see_also must be a boolean"):
-            await svc.build_entity_graph(
-                PROJECT_ID,
-                str(EX.Person),
-                BRANCH,
-                include_see_also="yes",  # type: ignore[arg-type]
-            )
-
 
 class TestBuildEntityGraphIncomingRestrictions:
     @pytest.mark.asyncio

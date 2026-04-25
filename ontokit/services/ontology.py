@@ -34,10 +34,14 @@ from ontokit.schemas.owl_property import (
     OWLPropertyResponse,
     OWLPropertyUpdate,
 )
+from ontokit.services.entity_graph_helpers import (
+    get_see_also_referrers,
+    get_see_also_targets,
+)
 from ontokit.services.storage import StorageService
 
 if TYPE_CHECKING:
-    from ontokit.schemas.graph import EntityGraphResponse
+    from ontokit.schemas.graph import EntityGraphResponse, GraphEdgeType, GraphNodeType
 
 # Map file extensions to RDF formats
 FORMAT_MAP = {
@@ -368,6 +372,7 @@ class OntologyService:
         max_nodes: int = 200,
         include_see_also: bool = True,
         max_see_also_per_node: int = 5,
+        label_preferences: list[str] | None = None,
     ) -> EntityGraphResponse | None:
         """Build a multi-hop graph around a class via BFS.
 
@@ -383,8 +388,6 @@ class OntologyService:
             raise ValueError("descendants_depth must be non-negative")
         if max_see_also_per_node < 0:
             raise ValueError("max_see_also_per_node must be non-negative")
-        if not isinstance(include_see_also, bool):
-            raise ValueError("include_see_also must be a boolean")
 
         from ontokit.schemas.graph import EntityGraphResponse, GraphEdge, GraphNode
 
@@ -396,10 +399,20 @@ class OntologyService:
 
         owl_thing = OWL.Thing
 
+        # Derive a preferred language from label_preferences for definitions
+        # (e.g., ["rdfs:label@es", ...] → "es"). Used to prefer matching-language
+        # rdfs:comment / skos:definition over arbitrary first hit.
+        preferred_lang: str | None = None
+        for pref_string in label_preferences or []:
+            pref = LabelPreference.parse(pref_string)
+            if pref is not None and pref.language:
+                preferred_lang = pref.language
+                break
+
         visited: dict[str, GraphNode] = {}
         edges: list[GraphEdge] = []
         edge_ids: set[str] = set()
-        total_discovered = [0]
+        total_discovered = 0
 
         def _get_local_name(iri: str) -> str:
             if "#" in iri:
@@ -407,7 +420,7 @@ class OntologyService:
             return iri.rsplit("/", 1)[-1]
 
         def _get_label(uri: URIRef) -> str:
-            label = select_preferred_label(graph, uri)
+            label = select_preferred_label(graph, uri, label_preferences)
             return label if label else _get_local_name(str(uri))
 
         def _is_external(iri: str) -> bool:
@@ -421,7 +434,7 @@ class OntologyService:
             ]
             return len(parents) == 0
 
-        def _classify_node(uri: URIRef, is_focus: bool, _depth: int) -> str:
+        def _classify_node(uri: URIRef, is_focus: bool, _depth: int) -> GraphNodeType:
             iri = str(uri)
             if is_focus:
                 return "focus"
@@ -442,13 +455,19 @@ class OntologyService:
             return "class"
 
         def _get_definition(uri: URIRef) -> str | None:
-            # Try SKOS definition first, then rdfs:comment
-            for obj in graph.objects(uri, SKOS.definition):
-                if isinstance(obj, RDFLiteral):
-                    return str(obj)
-            for obj in graph.objects(uri, RDFS.comment):
-                if isinstance(obj, RDFLiteral):
-                    return str(obj)
+            # Prefer the project's preferred language; fall back to any literal.
+            # SKOS definition takes precedence over rdfs:comment.
+            for predicate in (SKOS.definition, RDFS.comment):
+                fallback: str | None = None
+                for obj in graph.objects(uri, predicate):
+                    if not isinstance(obj, RDFLiteral):
+                        continue
+                    if preferred_lang and obj.language == preferred_lang:
+                        return str(obj)
+                    if fallback is None:
+                        fallback = str(obj)
+                if fallback is not None:
+                    return fallback
             return None
 
         def _child_count(uri: URIRef) -> int:
@@ -461,12 +480,13 @@ class OntologyService:
         seen: set[str] = set()
 
         def _make_node(uri: URIRef, depth: int) -> GraphNode | None:
+            nonlocal total_discovered
             iri = str(uri)
             if iri in visited:
                 return visited[iri]
             if iri not in seen:
                 seen.add(iri)
-                total_discovered[0] += 1
+                total_discovered += 1
             if len(visited) >= max_nodes:
                 return None
             is_focus = uri == class_uri
@@ -486,7 +506,9 @@ class OntologyService:
             visited[iri] = node
             return node
 
-        def _add_edge(source: str, target: str, edge_type: str, label: str | None = None) -> bool:
+        def _add_edge(
+            source: str, target: str, edge_type: GraphEdgeType, label: str | None = None
+        ) -> bool:
             eid = f"{source}->{target}:{edge_type}"
             if eid in edge_ids:
                 return False
@@ -556,64 +578,10 @@ class OntologyService:
 
         # Extract seeAlso targets from OWL restrictions on rdfs:seeAlso
         def _get_see_also_targets(uri: URIRef) -> list[URIRef]:
-            """Extract seeAlso targets from both direct triples and OWL restrictions.
-
-            FOLIO encodes seeAlso as owl:Restriction with owl:someValuesFrom
-            inside rdfs:subClassOf, not as direct rdfs:seeAlso triples.
-            """
-            seen: set[URIRef] = set()
-            targets: list[URIRef] = []
-
-            def _add(ref: URIRef) -> None:
-                if ref not in seen:
-                    seen.add(ref)
-                    targets.append(ref)
-
-            # Direct rdfs:seeAlso triples
-            for obj in graph.objects(uri, RDFS.seeAlso):
-                if isinstance(obj, URIRef):
-                    _add(obj)
-            # OWL restrictions: subClassOf -> Restriction(onProperty=seeAlso, someValuesFrom=X)
-            for sc in graph.objects(uri, RDFS.subClassOf):
-                if isinstance(sc, URIRef):
-                    continue  # Named superclass, not a restriction
-                # sc is a blank node (restriction)
-                on_prop = next(graph.objects(sc, OWL.onProperty), None)
-                if on_prop == RDFS.seeAlso:
-                    for val in graph.objects(sc, OWL.someValuesFrom):
-                        if isinstance(val, URIRef):
-                            _add(val)
-                    for val in graph.objects(sc, OWL.allValuesFrom):
-                        if isinstance(val, URIRef):
-                            _add(val)
-                    for val in graph.objects(sc, OWL.hasValue):
-                        if isinstance(val, URIRef):
-                            _add(val)
-            return targets
+            return get_see_also_targets(graph, uri)
 
         def _get_see_also_referrers(uri: URIRef) -> list[URIRef]:
-            """Find classes that have seeAlso restrictions pointing TO this URI."""
-            seen: set[URIRef] = set()
-            referrers: list[URIRef] = []
-
-            def _add(ref: URIRef) -> None:
-                if ref not in seen:
-                    seen.add(ref)
-                    referrers.append(ref)
-
-            # Direct reverse rdfs:seeAlso
-            for subj in graph.subjects(RDFS.seeAlso, uri):
-                if isinstance(subj, URIRef):
-                    _add(subj)
-            # Find restrictions that reference uri via someValuesFrom/allValuesFrom/hasValue
-            for predicate in (OWL.someValuesFrom, OWL.allValuesFrom, OWL.hasValue):
-                for restriction in graph.subjects(predicate, uri):
-                    on_prop = next(graph.objects(restriction, OWL.onProperty), None)
-                    if on_prop == RDFS.seeAlso:
-                        for cls in graph.subjects(RDFS.subClassOf, restriction):
-                            if isinstance(cls, URIRef) and (cls, RDF.type, OWL.Class) in graph:
-                                _add(cls)
-            return referrers
+            return get_see_also_referrers(graph, uri)
 
         # Collect seeAlso cross-links
         # Outgoing seeAlso: checked on all visited nodes (focus + ancestors)
@@ -682,7 +650,7 @@ class OntologyService:
             if node.node_type == "root" and node.iri not in ancestor_visited:
                 node.node_type = "secondary_root"
 
-        truncated = total_discovered[0] > len(visited)
+        truncated = total_discovered > len(visited)
 
         return EntityGraphResponse(
             focus_iri=class_iri,
@@ -690,7 +658,7 @@ class OntologyService:
             nodes=list(visited.values()),
             edges=edges,
             truncated=truncated,
-            total_concept_count=total_discovered[0],
+            total_concept_count=total_discovered,
         )
 
     async def get_root_classes(
