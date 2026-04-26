@@ -740,6 +740,8 @@ class TestClearLintResults:
         async def _no_db():  # type: ignore[no-untyped-def]
             yield AsyncMock()
 
+        original_app_override_get_current_user = app.dependency_overrides.get(get_current_user)
+        original_app_override_get_db = app.dependency_overrides.get(get_db)
         app.dependency_overrides[get_current_user] = _no_user
         app.dependency_overrides[get_db] = _no_db
         try:
@@ -747,4 +749,11 @@ class TestClearLintResults:
             response = client.delete(f"/api/v1/projects/{PROJECT_ID}/lint/results")
             assert response.status_code == 401
         finally:
-            app.dependency_overrides.clear()
+            if original_app_override_get_current_user is None:
+                del app.dependency_overrides[get_current_user]
+            else:
+                app.dependency_overrides[get_current_user] = original_app_override_get_current_user
+            if original_app_override_get_db is None:
+                del app.dependency_overrides[get_db]
+            else:
+                app.dependency_overrides[get_db] = original_app_override_get_db

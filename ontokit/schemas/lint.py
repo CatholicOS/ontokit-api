@@ -162,10 +162,11 @@ class LintConfigResponse(BaseModel):
 class LintConfigUpdate(BaseModel):
     """Request body for updating lint configuration.
 
+    ``lint_level`` and ``enabled_rules`` are mutually exclusive — see ``enforce_xor``.
+
     Set ``lint_level`` to use a preset level (1-5).
     Set ``enabled_rules`` to configure individual rules (can be empty list to disable all).
     Set both to ``None`` to reset to default (all rules).
-    When ``lint_level`` is set, it takes precedence over ``enabled_rules``.
     """
 
     lint_level: int | None = Field(default=None, ge=1, le=5)

@@ -100,6 +100,11 @@ ignore = ["E501"]
 [tool.ruff.lint.isort]
 known-first-party = ["ontokit"]
 
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.11"
+
 [tool.mypy]
 python_version = "3.11"
 strict = true
