@@ -1,6 +1,7 @@
 """Per-project lint configuration model."""
 
 import uuid
+from collections.abc import Set as AbstractSet
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -18,7 +19,8 @@ class ProjectLintConfig(Base):
 
     Stores which lint rules are enabled for a project, either via an explicit
     comma-separated list of rule IDs or via a preset lint level (1-5).
-    When ``lint_level`` is set, it takes precedence over ``enabled_rules``.
+    ``lint_level`` and ``enabled_rules`` are mutually exclusive — see the
+    ``enforce_xor`` validator on ``LintConfigUpdate``.
     """
 
     __tablename__ = "project_lint_configs"
@@ -43,13 +45,13 @@ class ProjectLintConfig(Base):
     def __repr__(self) -> str:
         return f"<ProjectLintConfig(project_id={self.project_id}, lint_level={self.lint_level})>"
 
-    def get_enabled_rule_ids(self) -> set[str] | None:
+    def get_enabled_rule_ids(self) -> AbstractSet[str] | None:
         """Resolve the effective set of enabled rule IDs.
 
         Returns:
             - ``None`` when no configuration has been set (meaning all rules)
-            - An empty ``set()`` when rules are explicitly set to none
-            - A non-empty ``set`` of specific rule IDs otherwise
+            - An empty set when rules are explicitly set to none
+            - A non-empty set of specific rule IDs otherwise
         """
         from ontokit.services.linter import ALL_RULE_IDS, get_rules_for_level
 

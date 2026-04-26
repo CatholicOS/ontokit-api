@@ -561,9 +561,9 @@ async def update_lint_config(
 
     Requires owner or admin role.
 
-    Set ``lint_level`` to use a preset level (1-5).
-    Set ``enabled_rules`` to configure individual rules (empty list disables all).
-    Set both to ``null`` to reset to default (all rules).
+    ``lint_level`` and ``enabled_rules`` are mutually exclusive: set exactly one
+    or set both to ``null`` to reset to all rules. Pass ``enabled_rules=[]`` to
+    explicitly disable every rule.
     """
     await verify_project_access(project_id, db, user, require_manage=True)
 
@@ -572,28 +572,34 @@ async def update_lint_config(
     if body.enabled_rules is not None:
         enabled_rules_str = ",".join(sorted(body.enabled_rules))
 
-    # Upsert to handle concurrent first-time PUTs safely
-    stmt = pg_insert(ProjectLintConfig).values(
-        project_id=project_id,
-        lint_level=body.lint_level,
-        enabled_rules=enabled_rules_str,
+    # Upsert to handle concurrent first-time PUTs safely; RETURNING gives
+    # us the persisted row in the same round trip. Wrapping in select(...).from_statement(...)
+    # with populate_existing materializes the returned row as an ORM instance.
+    insert_stmt = (
+        pg_insert(ProjectLintConfig)
+        .values(
+            project_id=project_id,
+            lint_level=body.lint_level,
+            enabled_rules=enabled_rules_str,
+        )
+        .on_conflict_do_update(
+            index_elements=[ProjectLintConfig.project_id],
+            set_={
+                "lint_level": body.lint_level,
+                "enabled_rules": enabled_rules_str,
+                "updated_at": func.now(),
+            },
+        )
+        .returning(ProjectLintConfig)
     )
-    stmt = stmt.on_conflict_do_update(
-        index_elements=[ProjectLintConfig.project_id],
-        set_={
-            "lint_level": body.lint_level,
-            "enabled_rules": enabled_rules_str,
-            "updated_at": func.now(),
-        },
+    orm_stmt = (
+        select(ProjectLintConfig)
+        .from_statement(insert_stmt)
+        .execution_options(populate_existing=True)
     )
-    await db.execute(stmt)
-    await db.commit()
-
-    # Re-fetch the config to return the updated state
-    result = await db.execute(
-        select(ProjectLintConfig).where(ProjectLintConfig.project_id == project_id)
-    )
+    result = await db.execute(orm_stmt)
     config = result.scalar_one()
+    await db.commit()
     return _serialize_lint_config(project_id, config)
 
 

@@ -2,6 +2,7 @@
 
 import contextlib
 from collections import defaultdict
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 from uuid import UUID
@@ -36,7 +37,7 @@ class LintRuleInfo:
     name: str
     description: str
     severity: str
-    scope: list[str] = field(default_factory=lambda: ["class"])
+    scope: list[str]
 
 
 # Scope constants for rule applicability
@@ -252,18 +253,20 @@ LINT_LEVEL_DEFINITIONS: dict[int, LintLevelDefinition] = {
 }
 
 
-def get_rules_for_level(level: int) -> set[str]:
-    """Return the set of rule IDs enabled at a given lint level (1-5)."""
+def get_rules_for_level(level: int) -> frozenset[str]:
+    """Return the immutable set of rule IDs enabled at a given lint level (1-5)."""
     if level < 1 or level > 5:
         raise ValueError(f"Lint level must be between 1 and 5, got {level}")
-    return set(LINT_LEVELS[level])
+    return LINT_LEVELS[level]
 
 
 @dataclass
 class OntologyLinter:
     """Service for checking ontology health and finding issues."""
 
-    enabled_rules: set[str] = field(default_factory=lambda: {r.rule_id for r in LINT_RULES})
+    enabled_rules: AbstractSet[str] = field(
+        default_factory=lambda: frozenset(r.rule_id for r in LINT_RULES)
+    )
     _uri_subjects: set[URIRef] = field(default_factory=set, init=False, repr=False)
 
     def get_enabled_rules(self) -> list[LintRuleInfo]:
@@ -651,7 +654,7 @@ class OntologyLinter:
                                 rule_id="undefined-prefix",
                                 message=f"Prefix '{prefix}' is not defined",
                                 subject_iri=iri,
-                                subject_type="other",
+                                subject_type=self._determine_entity_type(graph, term),
                                 details={
                                     "prefix": prefix,
                                     "iri": iri,
@@ -1325,7 +1328,7 @@ class OntologyLinter:
         return None
 
 
-def get_linter(enabled_rules: set[str] | None = None) -> OntologyLinter:
+def get_linter(enabled_rules: AbstractSet[str] | None = None) -> OntologyLinter:
     """
     Get an ontology linter instance.
 

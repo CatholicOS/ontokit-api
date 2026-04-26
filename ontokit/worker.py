@@ -9,6 +9,7 @@ from uuid import UUID
 from arq import ArqRedis, cron, func
 from arq.connections import RedisSettings
 from sqlalchemy import select
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import selectinload
 
@@ -266,12 +267,24 @@ async def run_lint_task(
         else:
             raise ValueError(f"Project {project_id} has no git repository and no storage file")
 
-        # Load per-project lint configuration
-        config_result = await db.execute(
-            select(ProjectLintConfig).where(ProjectLintConfig.project_id == project_uuid)
-        )
-        lint_config = config_result.scalar_one_or_none()
-        enabled_rules = lint_config.get_enabled_rule_ids() if lint_config else None
+        # Load per-project lint configuration. Tolerate the table being absent
+        # (migration not yet applied) by falling back to all rules.
+        from collections.abc import Set as AbstractSet
+
+        enabled_rules: AbstractSet[str] | None
+        try:
+            config_result = await db.execute(
+                select(ProjectLintConfig).where(ProjectLintConfig.project_id == project_uuid)
+            )
+            lint_config = config_result.scalar_one_or_none()
+            enabled_rules = lint_config.get_enabled_rule_ids() if lint_config else None
+        except ProgrammingError:
+            logger.warning(
+                "project_lint_configs table not found; using all lint rules. "
+                "Run `alembic upgrade head` to enable per-project lint configuration."
+            )
+            await db.rollback()
+            enabled_rules = None
 
         # Run linting
         linter = get_linter(enabled_rules=enabled_rules)

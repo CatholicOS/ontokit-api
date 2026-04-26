@@ -74,10 +74,12 @@ class TestLintLevels:
         with pytest.raises(ValueError, match="between 1 and 5"):
             get_rules_for_level(6)
 
-    def test_get_rules_returns_copy(self) -> None:
-        """get_rules_for_level returns a copy, not the original set."""
+    def test_get_rules_is_immutable(self) -> None:
+        """get_rules_for_level returns a frozenset so callers cannot mutate the source."""
         rules = get_rules_for_level(1)
-        rules.add("fake-rule")
+        assert isinstance(rules, frozenset)
+        with pytest.raises(AttributeError):
+            rules.add("fake-rule")  # type: ignore[attr-defined]
         assert "fake-rule" not in LINT_LEVELS[1]
 
     def test_each_level_has_more_rules(self) -> None:
@@ -256,13 +258,10 @@ class TestUpdateLintConfig:
         mock_session: AsyncMock,
         config_after: Mock,
     ) -> None:
-        """Configure mock session for upsert flow (execute upsert, commit, re-fetch)."""
-        # First execute: upsert statement (returns nothing meaningful)
+        """Configure mock session for upsert flow (single execute via RETURNING + commit)."""
         upsert_result = MagicMock()
-        # Second execute: re-fetch after commit
-        refetch_result = MagicMock()
-        refetch_result.scalar_one.return_value = config_after
-        mock_session.execute.side_effect = [upsert_result, refetch_result]
+        upsert_result.scalar_one.return_value = config_after
+        mock_session.execute.return_value = upsert_result
 
     @patch("ontokit.api.routes.lint.verify_project_access", new_callable=AsyncMock)
     def test_set_lint_level(

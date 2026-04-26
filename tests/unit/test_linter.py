@@ -2,7 +2,7 @@
 
 from uuid import uuid4
 
-from rdflib import BNode, Graph, Literal, Namespace
+from rdflib import BNode, Graph, Literal, Namespace, URIRef
 from rdflib.namespace import OWL, RDF, RDFS, SKOS, XSD
 
 from ontokit.services.linter import (
@@ -834,3 +834,81 @@ async def test_no_missing_type_declaration_when_typed() -> None:
 
     matches = _results_with_rule(issues, "missing-type-declaration")
     assert len(matches) == 0
+
+
+async def test_missing_type_declaration_slash_namespace_ontology() -> None:
+    """Ontology IRI without a trailing separator and slash-style subjects.
+
+    Exercises the candidate-namespace branch that picks ``base + "/"`` over
+    ``base + "#"`` when the actual subjects use slashes.
+    """
+    g = Graph()
+    onto = "http://example.org/myonto"
+    g.add((URIRef(onto), RDF.type, OWL.Ontology))
+    g.add((URIRef(f"{onto}/Animal"), RDF.type, OWL.Class))
+    # Untyped resource in the same slash-namespace
+    g.add((URIRef(f"{onto}/mystery"), RDFS.label, Literal("Mystery", lang="en")))
+
+    linter = OntologyLinter(enabled_rules={"missing-type-declaration"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "missing-type-declaration")
+    assert len(matches) == 1
+    assert matches[0].subject_iri == f"{onto}/mystery"
+
+
+async def test_missing_type_declaration_inferred_hash_namespace() -> None:
+    """Inferred-namespace branch should pick the ``#``-prefix when subjects use it."""
+    HASH = Namespace("http://example.org/onto#")
+    g = Graph()
+    # No owl:Ontology declaration — namespace must be inferred
+    g.add((HASH.A, RDF.type, OWL.Class))
+    g.add((HASH.B, RDF.type, OWL.Class))
+    # Untyped resource sharing the inferred hash namespace
+    g.add((HASH.orphan, RDFS.label, Literal("Orphan", lang="en")))
+
+    linter = OntologyLinter(enabled_rules={"missing-type-declaration"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "missing-type-declaration")
+    assert len(matches) == 1
+    assert matches[0].subject_iri == str(HASH.orphan)
+
+
+async def test_missing_type_declaration_inferred_deep_slash_namespace() -> None:
+    """Inferred-namespace branch should pick the deepest ``/``-prefix when no ``#``."""
+    base = "http://example.org/vocab/v1/"
+    g = Graph()
+    g.add((URIRef(f"{base}A"), RDF.type, OWL.Class))
+    g.add((URIRef(f"{base}B"), RDF.type, OWL.Class))
+    g.add((URIRef(f"{base}orphan"), RDFS.label, Literal("Orphan", lang="en")))
+
+    linter = OntologyLinter(enabled_rules={"missing-type-declaration"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "missing-type-declaration")
+    assert len(matches) == 1
+    assert matches[0].subject_iri == f"{base}orphan"
+
+
+# ---------------------------------------------------------------------------
+# 23. undefined-prefix subject_type
+# ---------------------------------------------------------------------------
+
+
+async def test_undefined_prefix_subject_type_reflects_entity() -> None:
+    """undefined-prefix issues classify the offending term so the frontend
+    can navigate to the right entity panel."""
+    g = Graph()
+    # A class typed via rdf:type but referencing an undefined prefix in its IRI.
+    bad_class = URIRef("undefined:BadClass")
+    g.add((bad_class, RDF.type, OWL.Class))
+
+    linter = OntologyLinter(enabled_rules={"undefined-prefix"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = [
+        i for i in _results_with_rule(issues, "undefined-prefix") if i.subject_iri == str(bad_class)
+    ]
+    assert matches, "expected an undefined-prefix issue for the bad class IRI"
+    assert matches[0].subject_type == "class"
