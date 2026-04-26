@@ -308,6 +308,46 @@ class TestRunLintTask:
 
         assert mock_ctx["redis"].publish.await_count >= 2
 
+    @pytest.mark.asyncio
+    async def test_lint_falls_back_when_config_table_missing(
+        self, mock_ctx: dict[str, Any], project_id: str
+    ) -> None:
+        """If project_lint_configs table is absent (migration not run), the
+        worker logs, rolls back, and falls back to all rules."""
+        from sqlalchemy.exc import ProgrammingError
+
+        project = Mock()
+        project.source_file_path = "ontokit/test.ttl"
+
+        project_result = Mock()
+        project_result.scalar_one_or_none.return_value = project
+
+        # First execute() returns the project; second (lint config lookup) raises.
+        mock_ctx["db"].execute.side_effect = [
+            project_result,
+            ProgrammingError("relation does not exist", None, Exception("undefined table")),
+        ]
+
+        mock_run = MagicMock()
+        mock_run.id = uuid.uuid4()
+
+        with (
+            patch("ontokit.worker.get_storage_service"),
+            patch("ontokit.worker.get_ontology_service") as mock_onto_svc,
+            patch("ontokit.worker.get_linter") as mock_get_linter,
+            patch("ontokit.worker.LintRun", return_value=mock_run),
+        ):
+            mock_onto_svc.return_value.load_from_storage = AsyncMock(return_value=Mock())
+            mock_get_linter.return_value.lint = AsyncMock(return_value=[])
+
+            result = await run_lint_task(mock_ctx, project_id)
+
+        assert result["status"] == "completed"
+        # The session must be rolled back to clear the failed transaction.
+        mock_ctx["db"].rollback.assert_awaited()
+        # Linter must be constructed with enabled_rules=None (= all rules).
+        mock_get_linter.assert_called_with(enabled_rules=None)
+
 
 # ---------------------------------------------------------------------------
 # Lifecycle hooks
