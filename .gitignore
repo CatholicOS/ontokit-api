@@ -76,3 +76,6 @@ Thumbs.db
 
 # Local git worktrees
 .worktrees/
+
+# Claude Code transient local state (commands/ stays tracked)
+.claude/scheduled_tasks.lock
