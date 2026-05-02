@@ -125,6 +125,88 @@ class TestBuildEntityGraphBasic:
         assert person.definition == "SKOS definition"
 
     @pytest.mark.asyncio
+    async def test_label_preferences_threaded_to_labels(self) -> None:
+        """label_preferences should reach select_preferred_label so multilingual
+        projects see graph labels in their chosen language."""
+        g = _base_graph()
+        g.add((EX.Person, RDFS.label, Literal("Persona", lang="es")))
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(
+            PROJECT_ID, str(EX.Person), BRANCH,
+            label_preferences=["rdfs:label@es"],
+        )
+        assert result is not None
+        person = next(n for n in result.nodes if n.iri == str(EX.Person))
+        assert person.label == "Persona"
+
+    @pytest.mark.asyncio
+    async def test_definition_prefers_preferred_language(self) -> None:
+        """When label_preferences carries a language, _get_definition should
+        prefer matching-language literals over any other literal."""
+        g = _base_graph()
+        g.add((EX.Person, SKOS.definition, Literal("English definition", lang="en")))
+        g.add((EX.Person, SKOS.definition, Literal("Definición en español", lang="es")))
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(
+            PROJECT_ID, str(EX.Person), BRANCH,
+            label_preferences=["rdfs:label@es"],
+        )
+        assert result is not None
+        person = next(n for n in result.nodes if n.iri == str(EX.Person))
+        assert person.definition == "Definición en español"
+
+    @pytest.mark.asyncio
+    async def test_definition_falls_back_when_preferred_language_missing(self) -> None:
+        """If no literal matches the preferred language, fall back to the first
+        literal we did find (same predicate)."""
+        g = _base_graph()
+        g.add((EX.Person, SKOS.definition, Literal("English definition", lang="en")))
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(
+            PROJECT_ID, str(EX.Person), BRANCH,
+            label_preferences=["rdfs:label@es"],
+        )
+        assert result is not None
+        person = next(n for n in result.nodes if n.iri == str(EX.Person))
+        assert person.definition == "English definition"
+
+    @pytest.mark.asyncio
+    async def test_definition_prefers_skos_over_comment_in_same_language(self) -> None:
+        """SKOS definition still takes precedence over rdfs:comment, even with
+        a preferred language."""
+        g = _base_graph()
+        g.add((EX.Person, SKOS.definition, Literal("SKOS in es", lang="es")))
+        g.add((EX.Person, RDFS.comment, Literal("Comment in es", lang="es")))
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(
+            PROJECT_ID, str(EX.Person), BRANCH,
+            label_preferences=["rdfs:label@es"],
+        )
+        assert result is not None
+        person = next(n for n in result.nodes if n.iri == str(EX.Person))
+        assert person.definition == "SKOS in es"
+
+    @pytest.mark.asyncio
+    async def test_unparseable_label_preference_does_not_set_preferred_lang(self) -> None:
+        """A preference string the parser doesn't recognize (no matching
+        property) should be ignored — definition behavior degrades to
+        first-literal-wins, the no-preference default."""
+        g = _base_graph()
+        g.add((EX.Person, SKOS.definition, Literal("English definition", lang="en")))
+        g.add((EX.Person, SKOS.definition, Literal("Spanish definition", lang="es")))
+        svc = _service_with_graph(g)
+        result = await svc.build_entity_graph(
+            PROJECT_ID, str(EX.Person), BRANCH,
+            label_preferences=["unknown:property@es"],
+        )
+        assert result is not None
+        person = next(n for n in result.nodes if n.iri == str(EX.Person))
+        # No language gate — first literal returned by graph.objects() wins.
+        # We just assert one of the two known literals is returned, since
+        # rdflib doesn't guarantee triple order.
+        assert person.definition in {"English definition", "Spanish definition"}
+
+    @pytest.mark.asyncio
     async def test_child_count(self) -> None:
         svc = _service_with_graph(_base_graph())
         result = await svc.build_entity_graph(PROJECT_ID, str(EX.Person), BRANCH)
