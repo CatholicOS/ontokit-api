@@ -258,8 +258,8 @@ async def list_lint_runs(
     # skip/limit are FastAPI Query params typed as int with ge=0 / ge=1,le=100
     # bounds — they cannot carry SQL. SQLAlchemy .offset()/.limit() bind their
     # arguments as parameters, so the resulting query is parameterized.
-    # nosemgrep: python.fastapi.db.generic-sql-fastapi.generic-sql-fastapi
     result = await db.execute(
+        # nosemgrep: python.fastapi.db.generic-sql-fastapi.generic-sql-fastapi
         select(LintRun)
         .where(LintRun.project_id == project_id)
         .order_by(LintRun.started_at.desc())
