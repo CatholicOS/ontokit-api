@@ -79,6 +79,10 @@ def _make_session(
     session.summary = None
     session.created_at = datetime.now(UTC)
     session.last_activity = last_activity or datetime.now(UTC)
+    # Anonymous-suggestion fields default to non-anonymous for existing tests.
+    session.is_anonymous = False
+    session.submitter_name = None
+    session.submitter_email = None
     return session
 
 

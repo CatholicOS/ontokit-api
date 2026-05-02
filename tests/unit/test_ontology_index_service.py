@@ -451,7 +451,7 @@ class TestGetClassDetail:
         mock_entity_result = MagicMock()
         mock_entity_result.scalar_one_or_none.return_value = entity
 
-        # labels, comments, parents, child_count, annotations
+        # labels, comments, parents, child_count, annotations, non-rdfs labels
         mock_labels = MagicMock()
         mock_labels.scalars.return_value.all.return_value = []
         mock_comments = MagicMock()
@@ -462,6 +462,8 @@ class TestGetClassDetail:
         mock_child_count.scalar.return_value = 0
         mock_annotations = MagicMock()
         mock_annotations.scalars.return_value.all.return_value = []
+        mock_non_rdfs_labels = MagicMock()
+        mock_non_rdfs_labels.scalars.return_value.all.return_value = []
 
         mock_db.execute.side_effect = [
             mock_entity_result,
@@ -470,6 +472,7 @@ class TestGetClassDetail:
             mock_parents,
             mock_child_count,
             mock_annotations,
+            mock_non_rdfs_labels,
         ]
 
         result = await service.get_class_detail(PROJECT_ID, BRANCH, "http://example.org/Person")
@@ -539,6 +542,10 @@ class TestGetClassDetail:
         mock_annotations = MagicMock()
         mock_annotations.scalars.return_value.all.return_value = []
 
+        # Non-rdfs:label entries (translations/synonyms via skos:altLabel etc.)
+        mock_non_rdfs_labels = MagicMock()
+        mock_non_rdfs_labels.scalars.return_value.all.return_value = []
+
         mock_db.execute.side_effect = [
             mock_entity_result,
             mock_labels,
@@ -548,6 +555,7 @@ class TestGetClassDetail:
             mock_parent_labels,
             mock_child_count,
             mock_annotations,
+            mock_non_rdfs_labels,
         ]
 
         result = await service.get_class_detail(PROJECT_ID, BRANCH, "http://example.org/Person")
@@ -883,6 +891,10 @@ class TestGetClassDetailAnnotations:
         mock_annotations = MagicMock()
         mock_annotations.scalars.return_value.all.return_value = [ann]
 
+        # Non-rdfs:label entries (translations/synonyms via skos:altLabel etc.)
+        mock_non_rdfs_labels = MagicMock()
+        mock_non_rdfs_labels.scalars.return_value.all.return_value = []
+
         mock_db.execute.side_effect = [
             mock_entity_result,
             mock_labels,
@@ -890,6 +902,7 @@ class TestGetClassDetailAnnotations:
             mock_parents,
             mock_child_count,
             mock_annotations,
+            mock_non_rdfs_labels,
         ]
 
         result = await service.get_class_detail(PROJECT_ID, BRANCH, "http://example.org/Thing")
