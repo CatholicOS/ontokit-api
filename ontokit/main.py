@@ -1,6 +1,8 @@
 """OntoKit API - Main FastAPI Application."""
 
+import asyncio
 import logging
+import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -34,23 +36,38 @@ redis_pool: aioredis.Redis | None = None
 limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
 
 
+def _startup_print(message: str) -> None:
+    # Mirror lifespan progress to stderr so it surfaces in Railway/container
+    # deploy logs even when the logging pipeline isn't fully configured yet.
+    print(f"[ontokit] {message}", file=sys.stderr, flush=True)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler for startup/shutdown events."""
     global redis_pool  # noqa: PLW0603
 
+    _startup_print(f"Starting OntoKit API v{__version__} (env={settings.app_env})")
     logger.info("Starting OntoKit API v%s (env=%s)", __version__, settings.app_env)
 
-    # --- Database -----------------------------------------------------------
+    # --- Database (required — fail fast on hang) ----------------------------
+    _startup_print("Connecting to database...")
     try:
         async with engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
+            await asyncio.wait_for(conn.execute(text("SELECT 1")), timeout=20.0)
+        _startup_print("Database connection verified")
         logger.info("Database connection verified")
+    except TimeoutError:
+        _startup_print("Database connection timed out after 20s")
+        logger.exception("Database connection timed out")
+        raise
     except Exception:
+        _startup_print("Failed to connect to the database")
         logger.exception("Failed to connect to the database")
         raise
 
-    # --- Redis --------------------------------------------------------------
+    # --- Redis (optional) ---------------------------------------------------
+    _startup_print("Connecting to Redis...")
     try:
         pool = aioredis.from_url(  # type: ignore[no-untyped-call]
             str(settings.redis_url),
@@ -60,19 +77,31 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
         )
         await pool.ping()
         redis_pool = pool
+        _startup_print("Redis connection verified")
         logger.info("Redis connection verified")
     except Exception:
+        _startup_print("Failed to connect to Redis — continuing startup")
         logger.exception("Failed to connect to Redis — continuing startup")
         redis_pool = None
 
-    # --- MinIO / Object Storage ---------------------------------------------
+    # --- MinIO / Object Storage (optional) ----------------------------------
+    # MinIO's Python client is synchronous; StorageService now wraps it in
+    # asyncio.to_thread, but we still bound the call so a stuck MinIO can't
+    # delay startup beyond 15s.
+    _startup_print("Verifying MinIO bucket...")
     try:
         storage = StorageService()
-        await storage.ensure_bucket_exists()
+        await asyncio.wait_for(storage.ensure_bucket_exists(), timeout=15.0)
+        _startup_print(f"MinIO bucket '{settings.minio_bucket}' is ready")
         logger.info("MinIO bucket '%s' is ready", settings.minio_bucket)
+    except TimeoutError:
+        _startup_print("MinIO bucket check timed out after 15s — continuing startup")
+        logger.exception("MinIO bucket check timed out — continuing startup")
     except Exception:
+        _startup_print("Failed to initialise MinIO storage — continuing startup")
         logger.exception("Failed to initialise MinIO storage — continuing startup")
 
+    _startup_print("Startup complete")
     logger.info("Startup complete")
 
     yield
