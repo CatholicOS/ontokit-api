@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
-from unittest.mock import Mock
+from typing import Any
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi.testclient import TestClient
 
 from ontokit.core.config import settings
 from ontokit.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
-from ontokit.main import app, unhandled_exception_handler
+from ontokit.main import app, lifespan, unhandled_exception_handler
 
 
 @pytest.fixture
@@ -165,3 +167,141 @@ class TestUnhandledExceptionHandler:
 
         with pytest.raises(RuntimeError, match="kaboom"):
             await unhandled_exception_handler(Mock(), RuntimeError("kaboom"))
+
+
+class TestLifespan:
+    """Tests for the application lifespan (startup + shutdown).
+
+    These exercise the timeout / fail-fast paths added by PR #138 so that an
+    unreachable database fails startup quickly and an unreachable Redis or
+    MinIO degrades gracefully without blocking startup.
+    """
+
+    @pytest.fixture
+    def patched_lifespan(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+        """Patch every external dependency the lifespan touches.
+
+        Returns the mocks so individual tests can override behavior (e.g. raise
+        TimeoutError) and assert on calls.
+        """
+        # Reset module-level redis_pool so leftover state from a previous test
+        # doesn't affect shutdown branches.
+        import ontokit.main as main_module
+
+        monkeypatch.setattr(main_module, "redis_pool", None)
+
+        mock_conn = AsyncMock()
+        mock_conn.execute = AsyncMock()
+
+        connect_cm = AsyncMock()
+        connect_cm.__aenter__.return_value = mock_conn
+        connect_cm.__aexit__.return_value = None
+
+        mock_engine = Mock()
+        mock_engine.connect = Mock(return_value=connect_cm)
+        mock_engine.dispose = AsyncMock()
+        monkeypatch.setattr(main_module, "engine", mock_engine)
+
+        redis_pool_mock = AsyncMock()
+        redis_pool_mock.ping = AsyncMock()
+        redis_pool_mock.close = AsyncMock()
+        from_url = Mock(return_value=redis_pool_mock)
+        # Patch via string path so mypy strict mode doesn't object to
+        # `main_module.aioredis` (the alias isn't explicitly re-exported).
+        monkeypatch.setattr("ontokit.main.aioredis.from_url", from_url)
+
+        storage_instance = Mock()
+        storage_instance.ensure_bucket_exists = AsyncMock()
+        storage_cls = Mock(return_value=storage_instance)
+        monkeypatch.setattr(main_module, "StorageService", storage_cls)
+
+        close_arq = AsyncMock()
+        monkeypatch.setattr("ontokit.api.utils.redis.close_arq_pool", close_arq)
+
+        return {
+            "engine": mock_engine,
+            "conn": mock_conn,
+            "redis_pool": redis_pool_mock,
+            "redis_from_url": from_url,
+            "storage": storage_instance,
+            "close_arq": close_arq,
+        }
+
+    @pytest.mark.asyncio
+    async def test_happy_path_runs_startup_and_shutdown(
+        self, patched_lifespan: dict[str, Any]
+    ) -> None:
+        """When every backend is healthy, startup verifies all of them and
+        shutdown disposes the engine and closes the Redis + ARQ pools."""
+        async with lifespan(Mock()):
+            patched_lifespan["conn"].execute.assert_awaited_once()
+            patched_lifespan["redis_pool"].ping.assert_awaited_once()
+            patched_lifespan["storage"].ensure_bucket_exists.assert_awaited_once()
+
+        patched_lifespan["redis_pool"].close.assert_awaited_once()
+        patched_lifespan["close_arq"].assert_awaited_once()
+        patched_lifespan["engine"].dispose.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_database_timeout_aborts_startup(self, patched_lifespan: dict[str, Any]) -> None:
+        """A stuck DB connect must abort startup — we re-raise TimeoutError so
+        the container exits and is restarted by the orchestrator."""
+        patched_lifespan["conn"].execute.side_effect = asyncio.TimeoutError
+
+        with pytest.raises(asyncio.TimeoutError):
+            async with lifespan(Mock()):
+                pytest.fail("lifespan should not have yielded after DB timeout")
+
+    @pytest.mark.asyncio
+    async def test_database_failure_aborts_startup(self, patched_lifespan: dict[str, Any]) -> None:
+        """A non-timeout DB error (auth failure, bad config) also aborts."""
+        patched_lifespan["conn"].execute.side_effect = RuntimeError("connection refused")
+
+        with pytest.raises(RuntimeError, match="connection refused"):
+            async with lifespan(Mock()):
+                pytest.fail("lifespan should not have yielded after DB failure")
+
+    @pytest.mark.asyncio
+    async def test_redis_failure_continues_startup(self, patched_lifespan: dict[str, Any]) -> None:
+        """Redis is optional — its failure must not block startup, and the
+        module-level redis_pool must be left as None so feature code can
+        detect the degraded state."""
+        import ontokit.main as main_module
+
+        patched_lifespan["redis_pool"].ping.side_effect = RuntimeError("redis down")
+
+        async with lifespan(Mock()):
+            assert main_module.redis_pool is None
+
+    @pytest.mark.asyncio
+    async def test_minio_timeout_continues_startup(self, patched_lifespan: dict[str, Any]) -> None:
+        """MinIO is optional — a timeout must be swallowed so the API still
+        comes up serving non-storage endpoints."""
+        patched_lifespan["storage"].ensure_bucket_exists.side_effect = asyncio.TimeoutError
+
+        async with lifespan(Mock()):
+            patched_lifespan["storage"].ensure_bucket_exists.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_minio_failure_continues_startup(self, patched_lifespan: dict[str, Any]) -> None:
+        """Same for non-timeout MinIO errors (auth, missing bucket, etc.)."""
+        patched_lifespan["storage"].ensure_bucket_exists.side_effect = RuntimeError("nope")
+
+        async with lifespan(Mock()):
+            patched_lifespan["storage"].ensure_bucket_exists.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_swallows_cleanup_errors(self, patched_lifespan: dict[str, Any]) -> None:
+        """Shutdown must complete even if individual cleanup steps raise —
+        otherwise a flaky Redis can mask other shutdown work."""
+        patched_lifespan["redis_pool"].close.side_effect = RuntimeError("close failed")
+        patched_lifespan["close_arq"].side_effect = RuntimeError("arq close failed")
+        patched_lifespan["engine"].dispose.side_effect = RuntimeError("dispose failed")
+
+        # No exception should escape the lifespan exit.
+        async with lifespan(Mock()):
+            pass
+
+        patched_lifespan["redis_pool"].close.assert_awaited_once()
+        patched_lifespan["close_arq"].assert_awaited_once()
+        patched_lifespan["engine"].dispose.assert_awaited_once()
