@@ -51,10 +51,15 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Starting OntoKit API v%s (env=%s)", __version__, settings.app_env)
 
     # --- Database (required — fail fast on hang) ----------------------------
+    # asyncio.timeout() bounds the entire connect-and-execute block: a stuck
+    # TCP handshake in engine.connect() needs the same fail-fast behavior as
+    # a stuck query, otherwise startup can hang indefinitely on an unreachable
+    # database.
     _startup_print("Connecting to database...")
     try:
-        async with engine.connect() as conn:
-            await asyncio.wait_for(conn.execute(text("SELECT 1")), timeout=20.0)
+        async with asyncio.timeout(20.0):
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
         _startup_print("Database connection verified")
         logger.info("Database connection verified")
     except TimeoutError:

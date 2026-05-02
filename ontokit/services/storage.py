@@ -2,6 +2,7 @@
 
 import asyncio
 from io import BytesIO
+from typing import Any
 
 from minio import Minio
 from minio.error import S3Error
@@ -13,6 +14,17 @@ class StorageError(Exception):
     """Exception raised for storage operation errors."""
 
     pass
+
+
+def _read_and_release(response: Any) -> bytes:
+    # urllib3's release_conn() can do socket I/O; combine with read() so the
+    # whole response lifecycle stays off the event loop.
+    try:
+        data: bytes = response.read()
+        return data
+    finally:
+        response.close()
+        response.release_conn()
 
 
 class StorageService:
@@ -86,11 +98,7 @@ class StorageService:
                 bucket_name=self.bucket,
                 object_name=object_name,
             )
-            try:
-                return await asyncio.to_thread(response.read)
-            finally:
-                response.close()
-                response.release_conn()
+            return await asyncio.to_thread(_read_and_release, response)
         except S3Error as e:
             raise StorageError(f"Failed to download file: {e}") from e
 
