@@ -217,6 +217,13 @@ LINT_RULES: list[LintRuleInfo] = [
         severity=LintIssueType.WARNING.value,
         scope=["class"],
     ),
+    LintRuleInfo(
+        rule_id="multi-root",
+        name="Multiple Root Classes",
+        description="Ontology has more than 5 root classes (classes with no parent except owl:Thing)",
+        severity=LintIssueType.INFO.value,
+        scope=[],
+    ),
 ]
 
 # Map rule IDs to their info
@@ -246,6 +253,7 @@ _LEVEL_4_RULES: set[str] = _LEVEL_3_RULES | {
     "unused-property",
     "empty-domain",
     "empty-range",
+    "multi-root",
 }
 _LEVEL_5_RULES: set[str] = {r.rule_id for r in LINT_RULES}
 
@@ -1469,6 +1477,37 @@ class OntologyLinter:
                     )
                 )
         return issues
+
+    async def _check_multi_root(self, graph: Graph) -> list[LintResult]:
+        """Fire once if the ontology has more than 5 root classes."""
+        root_iris: list[str] = []
+        for cls in graph.subjects(RDF.type, OWL.Class):
+            if not isinstance(cls, URIRef) or cls == OWL.Thing:
+                continue
+            has_real_parent = any(
+                isinstance(p, URIRef) and p != OWL.Thing
+                for p in graph.objects(cls, RDFS.subClassOf)
+            )
+            if not has_real_parent:
+                root_iris.append(str(cls))
+
+        if len(root_iris) <= 5:
+            return []
+
+        return [
+            LintResult(
+                issue_type=LintIssueType.INFO.value,
+                rule_id="multi-root",
+                message=f"Ontology has {len(root_iris)} root classes (classes with no parent)",
+                subject_iri=None,
+                subject_type="other",
+                details={
+                    "root_count": len(root_iris),
+                    # Cap at 20 to keep the payload small even on huge ontologies.
+                    "root_iris": sorted(root_iris)[:20],
+                },
+            )
+        ]
 
     @staticmethod
     def _determine_entity_type(graph: Graph, uri: URIRef) -> str:

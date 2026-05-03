@@ -1144,3 +1144,60 @@ async def test_deprecated_parent_recognizes_string_true() -> None:
     issues = await linter.lint(g, PROJECT_ID)
 
     assert len(_results_with_rule(issues, "deprecated-parent")) == 1
+
+
+# ---------------------------------------------------------------------------
+# 29. multi-root
+# ---------------------------------------------------------------------------
+
+
+async def test_multi_root_does_not_fire_below_threshold() -> None:
+    """Five or fewer root classes does NOT fire."""
+    g = Graph()
+    for i in range(5):
+        g.add((URIRef(f"http://example.org/Root{i}"), RDF.type, OWL.Class))
+
+    linter = OntologyLinter(enabled_rules={"multi-root"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "multi-root") == []
+
+
+async def test_multi_root_fires_above_threshold() -> None:
+    """Six root classes triggers a single ontology-scope finding."""
+    g = Graph()
+    for i in range(6):
+        g.add((URIRef(f"http://example.org/Root{i}"), RDF.type, OWL.Class))
+
+    linter = OntologyLinter(enabled_rules={"multi-root"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "multi-root")
+    assert len(matches) == 1
+    assert matches[0].issue_type == "info"
+    assert matches[0].subject_iri is None
+    assert matches[0].subject_type == "other"
+    assert matches[0].details is not None
+    assert matches[0].details["root_count"] == 6
+
+
+async def test_multi_root_excludes_classes_with_explicit_parent() -> None:
+    """Classes with a non-owl:Thing parent don't count as roots."""
+    g = Graph()
+    g.add((EX.Animal, RDF.type, OWL.Class))
+    # 5 roots + 1 non-root subclass = still 5 numeric roots... PLUS Animal = 6 roots total.
+    for i in range(5):
+        g.add((URIRef(f"http://example.org/Root{i}"), RDF.type, OWL.Class))
+    g.add((EX.Dog, RDF.type, OWL.Class))
+    g.add((EX.Dog, RDFS.subClassOf, EX.Animal))
+    # EX.Animal itself is a root, so we have 6 roots when including it
+    # → fires. Verify the count excludes EX.Dog.
+
+    linter = OntologyLinter(enabled_rules={"multi-root"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "multi-root")
+    assert len(matches) == 1
+    assert matches[0].details is not None
+    assert matches[0].details["root_count"] == 6
+    assert str(EX.Dog) not in matches[0].details["root_iris"]
