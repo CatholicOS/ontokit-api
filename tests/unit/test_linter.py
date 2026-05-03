@@ -208,13 +208,22 @@ async def test_duplicate_label() -> None:
     for m in matches:
         assert m.issue_type == "warning"
 
+    # Verify the details payload shape (#99 review feedback)
+    for m in matches:
+        assert m.details is not None
+        assert m.details["label"] == "Thing"
+        assert m.details["language"] == "en"
+        assert m.details["total_duplicates"] == 1
+        assert isinstance(m.details["duplicate_iris"], list)
+        assert len(m.details["duplicate_iris"]) == 1
+
 
 # ---------------------------------------------------------------------------
-# 8. test_undefined_parent
+# 8. dangling-ref (subClassOf path)
 # ---------------------------------------------------------------------------
 
 
-async def test_undefined_parent() -> None:
+async def test_dangling_ref_flags_undeclared_subclass_target() -> None:
     """A class referencing a parent not defined in the ontology generates an error."""
     g = Graph()
     g.add((EX.Child, RDF.type, OWL.Class))
@@ -232,7 +241,7 @@ async def test_undefined_parent() -> None:
     assert matches[0].details["dangling_target"] == str(EX.Phantom)
 
 
-async def test_no_undefined_parent_when_defined() -> None:
+async def test_dangling_ref_does_not_flag_declared_subclass_target() -> None:
     """A parent that IS defined as owl:Class should not trigger the rule."""
     g = Graph()
     g.add((EX.Parent, RDF.type, OWL.Class))
@@ -1390,3 +1399,100 @@ def test_lint_levels_include_new_and_renamed_rules() -> None:
     assert "empty-domain" in LINT_LEVELS[4]
     assert "empty-range" in LINT_LEVELS[4]
     assert "multi-root" in LINT_LEVELS[4]
+
+
+# ---------------------------------------------------------------------------
+# 33. Review-feedback regressions (#99)
+# ---------------------------------------------------------------------------
+
+
+async def test_orphan_individual_catches_implicit_individuals() -> None:
+    """An individual lacking owl:NamedIndividual but typed as a class should still be flagged."""
+    g = Graph()
+    # No owl:NamedIndividual declaration on EX.Alice.
+    g.add((EX.Alice, RDF.type, EX.UndeclaredPerson))
+
+    linter = OntologyLinter(enabled_rules={"orphan-individual"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "orphan-individual")
+    assert len(matches) == 1
+    assert matches[0].subject_iri == str(EX.Alice)
+    assert matches[0].details is not None
+    assert matches[0].details["undeclared_type"] == str(EX.UndeclaredPerson)
+
+
+async def test_orphan_individual_does_not_flag_classes_themselves() -> None:
+    """A subject typed as owl:Class is not an individual and must not be flagged."""
+    g = Graph()
+    g.add((EX.Person, RDF.type, OWL.Class))
+
+    linter = OntologyLinter(enabled_rules={"orphan-individual"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "orphan-individual") == []
+
+
+async def test_deprecated_parent_recognizes_rdfs_class() -> None:
+    """A class declared via rdfs:Class with a deprecated rdfs:Class parent should be flagged."""
+    g = Graph()
+    g.add((EX.OldThing, RDF.type, RDFS.Class))
+    g.add((EX.OldThing, OWL.deprecated, Literal(True)))
+    g.add((EX.NewThing, RDF.type, RDFS.Class))
+    g.add((EX.NewThing, RDFS.subClassOf, EX.OldThing))
+
+    linter = OntologyLinter(enabled_rules={"deprecated-parent"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "deprecated-parent")
+    assert len(matches) == 1
+    assert matches[0].subject_iri == str(EX.NewThing)
+
+
+async def test_orphan_individual_recognizes_rdfs_class() -> None:
+    """When a class is declared via rdfs:Class, individuals typed as it should NOT be orphaned."""
+    g = Graph()
+    g.add((EX.Person, RDF.type, RDFS.Class))
+    g.add((EX.Alice, RDF.type, EX.Person))
+
+    linter = OntologyLinter(enabled_rules={"orphan-individual"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "orphan-individual") == []
+
+
+async def test_duplicate_label_uses_group_specific_label_casing() -> None:
+    """A subject with two labels that fall in different groups should report each group's actual label."""
+    g = Graph()
+    g.add((EX.A, RDF.type, OWL.Class))
+    g.add((EX.A, RDFS.label, Literal("Apple", lang="en")))
+    g.add((EX.A, RDFS.label, Literal("Banana", lang="en")))
+    g.add((EX.B, RDF.type, OWL.Class))
+    g.add((EX.B, RDFS.label, Literal("apple", lang="en")))
+
+    linter = OntologyLinter(enabled_rules={"duplicate-label"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "duplicate-label")
+    # Both A and B share the "apple" group; "Banana" group has size 1, no finding.
+    assert {m.subject_iri for m in matches} == {str(EX.A), str(EX.B)}
+    # Both findings must report the "apple" group's label, not whichever label
+    # of A was seen first.
+    for m in matches:
+        assert m.details is not None
+        assert m.details["label"].lower() == "apple"
+
+
+async def test_dangling_ref_skips_imported_hash_namespaces() -> None:
+    """References into namespaces declared via owl:imports using # form must not be flagged."""
+    g = Graph()
+    imported_ns = URIRef("http://other.org/onto")
+    g.add((URIRef("http://example.org/myonto"), OWL.imports, imported_ns))
+    g.add((EX.knows, RDF.type, OWL.ObjectProperty))
+    # The imported ontology uses hash IRIs; the linter must accept this form.
+    g.add((EX.knows, RDFS.range, URIRef("http://other.org/onto#Person")))
+
+    linter = OntologyLinter(enabled_rules={"dangling-ref"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "dangling-ref") == []

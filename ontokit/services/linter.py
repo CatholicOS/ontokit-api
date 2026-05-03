@@ -472,9 +472,14 @@ class OntologyLinter:
         for _ontology, _pred, imported in graph.triples((None, OWL.imports, None)):
             if isinstance(imported, URIRef):
                 imp_str = str(imported)
-                if not imp_str.endswith(("/", "#")):
-                    imp_str += "/"
-                imported_ns.add(imp_str)
+                # Both slash and hash forms are valid namespace shapes; if the
+                # owl:imports IRI already ends in one, keep it as-is, otherwise
+                # add both variants so terms can be matched either way.
+                if imp_str.endswith(("/", "#")):
+                    imported_ns.add(imp_str)
+                else:
+                    imported_ns.add(imp_str + "/")
+                    imported_ns.add(imp_str + "#")
         external_ns = well_known_ns | imported_ns
 
         # (subject_iri, predicate, target) keyed reporting to deduplicate
@@ -607,7 +612,10 @@ class OntologyLinter:
         # Skip resources whose entity_type is "other" — we only group concrete
         # types that the schema knows how to navigate.
         groups: dict[tuple[str, str, str | None], list[str]] = defaultdict(list)
-        original_label_for: dict[str, str] = {}
+        # Track one canonical display label per group key (first-seen wins) so the
+        # message reports the casing that goes with the matched group rather than
+        # whichever label happened to be iterated first for the subject.
+        original_label_for_group: dict[tuple[str, str, str | None], str] = {}
 
         for subject in self._uri_subjects:
             etype = self._determine_entity_type(graph, subject)
@@ -624,19 +632,19 @@ class OntologyLinter:
                 subj_iri = str(subject)
                 if subj_iri not in groups[key]:
                     groups[key].append(subj_iri)
-                original_label_for.setdefault(subj_iri, label_str)
+                original_label_for_group.setdefault(key, label_str)
 
         reported_iris: set[str] = set()
         for (etype, _lower, lang), iris in groups.items():
             if len(iris) < 2:
                 continue
+            shown_label = original_label_for_group[(etype, _lower, lang)]
             for iri in iris:
                 if iri in reported_iris:
                     continue
                 reported_iris.add(iri)
                 others = [o for o in iris if o != iri]
                 lang_str = f"@{lang}" if lang else ""
-                shown_label = original_label_for[iri]
                 issues.append(
                     LintResult(
                         issue_type=LintIssueType.WARNING.value,
@@ -1421,14 +1429,23 @@ class OntologyLinter:
         return issues
 
     async def _check_orphan_individual(self, graph: Graph) -> list[LintResult]:
-        """Flag individuals whose rdf:type target is not declared as owl:Class."""
+        """Flag individuals whose rdf:type target is not declared as owl:Class or rdfs:Class."""
         issues: list[LintResult] = []
-        declared_classes = {c for c in graph.subjects(RDF.type, OWL.Class) if isinstance(c, URIRef)}
+        declared_classes = self._class_subjects(graph)
         # owl:Thing is implicitly a class even if not declared.
         declared_classes.add(OWL.Thing)
 
-        for ind in graph.subjects(RDF.type, OWL.NamedIndividual):
-            if not isinstance(ind, URIRef):
+        # Dedup subjects since graph.subjects(RDF.type, None) may yield the
+        # same subject multiple times when it has multiple rdf:type values.
+        seen_individuals: set[URIRef] = set()
+        for ind in graph.subjects(RDF.type, None):
+            if not isinstance(ind, URIRef) or ind in seen_individuals:
+                continue
+            seen_individuals.add(ind)
+            # Skip subjects that are themselves classes, properties, or untyped —
+            # _determine_entity_type returns "individual" only for resources that
+            # have an rdf:type but aren't declared as a class or property.
+            if self._determine_entity_type(graph, ind) != "individual":
                 continue
             for type_target in graph.objects(ind, RDF.type):
                 if not isinstance(type_target, URIRef):
@@ -1498,7 +1515,7 @@ class OntologyLinter:
     async def _check_deprecated_parent(self, graph: Graph) -> list[LintResult]:
         """Flag classes that subclass an owl:deprecated class."""
         issues: list[LintResult] = []
-        for cls in graph.subjects(RDF.type, OWL.Class):
+        for cls in self._class_subjects(graph):
             if not isinstance(cls, URIRef):
                 continue
             for parent in graph.objects(cls, RDFS.subClassOf):
@@ -1525,7 +1542,7 @@ class OntologyLinter:
     async def _check_multi_root(self, graph: Graph) -> list[LintResult]:
         """Fire once if the ontology has more than 5 root classes."""
         root_iris: list[str] = []
-        for cls in graph.subjects(RDF.type, OWL.Class):
+        for cls in self._class_subjects(graph):
             if not isinstance(cls, URIRef) or cls == OWL.Thing:
                 continue
             has_real_parent = any(
@@ -1552,6 +1569,16 @@ class OntologyLinter:
                 },
             )
         ]
+
+    @staticmethod
+    def _class_subjects(graph: Graph) -> set[URIRef]:
+        """Return all URIRef subjects declared as owl:Class or rdfs:Class."""
+        classes: set[URIRef] = set()
+        for cls_type in (OWL.Class, RDFS.Class):
+            for cls in graph.subjects(RDF.type, cls_type):
+                if isinstance(cls, URIRef):
+                    classes.add(cls)
+        return classes
 
     @staticmethod
     def _determine_entity_type(graph: Graph, uri: URIRef) -> str:
