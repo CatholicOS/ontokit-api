@@ -1496,3 +1496,159 @@ async def test_dangling_ref_skips_imported_hash_namespaces() -> None:
     issues = await linter.lint(g, PROJECT_ID)
 
     assert _results_with_rule(issues, "dangling-ref") == []
+
+
+# ---------------------------------------------------------------------------
+# 34. Defensive-guard coverage (#99)
+# ---------------------------------------------------------------------------
+
+
+async def test_unused_property_skips_blank_node_property() -> None:
+    """A blank-node typed as a property must not crash the rule."""
+    g = Graph()
+    g.add((BNode(), RDF.type, OWL.ObjectProperty))
+    g.add((EX.knows, RDF.type, OWL.ObjectProperty))  # ensures rule reaches the URIRef path
+    g.add((EX.Alice, EX.knows, EX.Bob))
+
+    linter = OntologyLinter(enabled_rules={"unused-property"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    # Used property is not flagged; blank-node property is silently skipped.
+    assert _results_with_rule(issues, "unused-property") == []
+
+
+async def test_orphan_individual_skips_blank_node_type_target() -> None:
+    """Individuals with blank-node type targets do not crash the rule."""
+    g = Graph()
+    g.add((EX.Alice, RDF.type, OWL.NamedIndividual))
+    g.add((EX.Alice, RDF.type, BNode()))  # blank-node restriction-style type target
+
+    linter = OntologyLinter(enabled_rules={"orphan-individual"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "orphan-individual") == []
+
+
+async def test_empty_domain_skips_blank_node_property() -> None:
+    g = Graph()
+    g.add((BNode(), RDF.type, OWL.ObjectProperty))
+    g.add((EX.named, RDF.type, OWL.ObjectProperty))
+    g.add((EX.named, RDFS.domain, EX.Person))
+
+    linter = OntologyLinter(enabled_rules={"empty-domain"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "empty-domain") == []
+
+
+async def test_empty_range_skips_blank_node_property() -> None:
+    g = Graph()
+    g.add((BNode(), RDF.type, OWL.ObjectProperty))
+    g.add((EX.named, RDF.type, OWL.ObjectProperty))
+    g.add((EX.named, RDFS.range, EX.Person))
+
+    linter = OntologyLinter(enabled_rules={"empty-range"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "empty-range") == []
+
+
+async def test_deprecated_parent_skips_blank_nodes() -> None:
+    """Both blank-node classes and blank-node parents must be skipped silently."""
+    g = Graph()
+    # Blank-node class (e.g., owl:Restriction) — should not be iterated.
+    g.add((BNode(), RDF.type, OWL.Class))
+    # A real class with a blank-node parent (e.g., from owl:Restriction) — should be skipped.
+    g.add((EX.Foo, RDF.type, OWL.Class))
+    g.add((EX.Foo, RDFS.subClassOf, BNode()))
+
+    linter = OntologyLinter(enabled_rules={"deprecated-parent"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "deprecated-parent") == []
+
+
+async def test_multi_root_skips_blank_node_classes() -> None:
+    """Blank-node classes don't count as roots."""
+    g = Graph()
+    # 5 real roots (under the threshold)…
+    for i in range(5):
+        g.add((URIRef(f"http://example.org/Root{i}"), RDF.type, OWL.Class))
+    # …plus 5 blank-node classes; if the guard worked, none of these count.
+    for _ in range(5):
+        g.add((BNode(), RDF.type, OWL.Class))
+
+    linter = OntologyLinter(enabled_rules={"multi-root"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "multi-root") == []
+
+
+async def test_duplicate_label_skips_subject_with_no_type() -> None:
+    """A subject that has rdfs:label but no rdf:type is treated as 'other' and skipped."""
+    g = Graph()
+    # No rdf:type for EX.Anon, just a label.
+    g.add((EX.Anon, RDFS.label, Literal("Foo", lang="en")))
+    g.add((EX.AnonTwo, RDFS.label, Literal("Foo", lang="en")))
+
+    linter = OntologyLinter(enabled_rules={"duplicate-label"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    # Both subjects resolve to entity type "other" and are silently dropped.
+    assert _results_with_rule(issues, "duplicate-label") == []
+
+
+async def test_duplicate_label_skips_non_literal_label_objects() -> None:
+    """rdfs:label values that aren't literals (e.g., URIRefs) must be ignored, not crash."""
+    g = Graph()
+    g.add((EX.A, RDF.type, OWL.Class))
+    g.add((EX.A, RDFS.label, EX.SomeIRI))  # non-literal — skipped
+    g.add((EX.A, RDFS.label, Literal("Real", lang="en")))
+    g.add((EX.B, RDF.type, OWL.Class))
+    g.add((EX.B, RDFS.label, Literal("real", lang="en")))
+
+    linter = OntologyLinter(enabled_rules={"duplicate-label"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    # The literal labels still match case-insensitively; the IRI label is ignored.
+    matches = _results_with_rule(issues, "duplicate-label")
+    assert {m.subject_iri for m in matches} == {str(EX.A), str(EX.B)}
+
+
+async def test_duplicate_label_skips_empty_and_whitespace_labels() -> None:
+    """Empty or whitespace-only labels must not be grouped (would otherwise spuriously match)."""
+    g = Graph()
+    g.add((EX.A, RDF.type, OWL.Class))
+    g.add((EX.A, RDFS.label, Literal("", lang="en")))
+    g.add((EX.B, RDF.type, OWL.Class))
+    g.add((EX.B, RDFS.label, Literal("   ", lang="en")))
+
+    linter = OntologyLinter(enabled_rules={"duplicate-label"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "duplicate-label") == []
+
+
+async def test_duplicate_label_subject_in_two_duplicate_groups_reported_once() -> None:
+    """When the same subject is in two duplicate groups, it should be reported only once."""
+    # A has both "Apple"@en and "Banana"@en. B duplicates "apple". C duplicates "banana".
+    # Both groups fire; A appears in both. The reported_iris guard ensures A only
+    # gets one finding, not two.
+    g = Graph()
+    g.add((EX.A, RDF.type, OWL.Class))
+    g.add((EX.A, RDFS.label, Literal("Apple", lang="en")))
+    g.add((EX.A, RDFS.label, Literal("Banana", lang="en")))
+    g.add((EX.B, RDF.type, OWL.Class))
+    g.add((EX.B, RDFS.label, Literal("apple", lang="en")))
+    g.add((EX.C, RDF.type, OWL.Class))
+    g.add((EX.C, RDFS.label, Literal("banana", lang="en")))
+
+    linter = OntologyLinter(enabled_rules={"duplicate-label"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "duplicate-label")
+    flagged_iris = [m.subject_iri for m in matches]
+    # Each subject appears at most once even though A is in two groups.
+    assert flagged_iris.count(str(EX.A)) == 1
+    # All three subjects flagged.
+    assert set(flagged_iris) == {str(EX.A), str(EX.B), str(EX.C)}
