@@ -3,7 +3,7 @@
 from uuid import uuid4
 
 from rdflib import BNode, Graph, Literal, Namespace, URIRef
-from rdflib.namespace import OWL, RDF, RDFS, SKOS, XSD
+from rdflib.namespace import DC, DCTERMS, OWL, RDF, RDFS, SKOS, XSD
 
 from ontokit.services.linter import (
     LINT_RULES,
@@ -1247,6 +1247,7 @@ async def test_dangling_ref_flags_undefined_range() -> None:
     assert matches[0].subject_iri == str(EX.age)
     assert matches[0].details is not None
     assert matches[0].details["predicate"] == str(RDFS.range)
+    assert matches[0].details["dangling_target"] == str(EX.UndeclaredDatatype)
 
 
 async def test_dangling_ref_subclassof_includes_predicate_detail() -> None:
@@ -1271,6 +1272,12 @@ async def test_dangling_ref_skips_well_known_namespaces() -> None:
     g.add((EX.knows, RDFS.range, XSD.string))
     g.add((EX.related, RDF.type, OWL.ObjectProperty))
     g.add((EX.related, RDFS.range, SKOS.Concept))
+    # Also exercise the DC and DCTERMS skiplist entries so all 7 well-known
+    # namespaces are covered by this test, not just XSD and SKOS.
+    g.add((EX.titledBy, RDF.type, OWL.AnnotationProperty))
+    g.add((EX.titledBy, RDFS.range, DC.title))
+    g.add((EX.createdBy, RDF.type, OWL.AnnotationProperty))
+    g.add((EX.createdBy, RDFS.range, DCTERMS.creator))
 
     linter = OntologyLinter(enabled_rules={"dangling-ref"})
     issues = await linter.lint(g, PROJECT_ID)
