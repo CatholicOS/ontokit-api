@@ -1256,7 +1256,7 @@ async def test_dangling_ref_subclassof_includes_predicate_detail() -> None:
 
 
 async def test_dangling_ref_skips_well_known_namespaces() -> None:
-    """References into rdf/rdfs/owl/xsd/skos/dcterms must not be flagged."""
+    """References into rdf/rdfs/owl/xsd/skos/dc/dcterms must not be flagged."""
     g = Graph()
     g.add((EX.knows, RDF.type, OWL.ObjectProperty))
     g.add((EX.knows, RDFS.range, XSD.string))

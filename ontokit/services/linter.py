@@ -450,13 +450,8 @@ class OntologyLinter:
         """
         issues: list[LintResult] = []
 
-        # A URI is "known" if it appears as a subject of any rdf:type triple
-        # OR as a subject of any triple at all (covers blank-node-free uses).
-        declared_subjects: set[URIRef] = {
-            s for s in graph.subjects(RDF.type, None) if isinstance(s, URIRef)
-        }
-        all_subjects: set[URIRef] = {s for s in graph.subjects() if isinstance(s, URIRef)}
-        known: set[URIRef] = declared_subjects | all_subjects | {OWL.Thing}
+        # A URI is "known" if it appears as a subject of any triple in this graph.
+        known: set[URIRef] = {s for s in graph.subjects() if isinstance(s, URIRef)} | {OWL.Thing}
 
         well_known_ns = {
             str(RDF),
@@ -484,7 +479,7 @@ class OntologyLinter:
             for subj, _p, obj in graph.triples((None, predicate, None)):
                 if not isinstance(obj, URIRef) or not isinstance(subj, URIRef):
                     continue
-                if obj == OWL.Thing or obj in known:
+                if obj in known:
                     continue
                 obj_str = str(obj)
                 if any(obj_str.startswith(ns) for ns in external_ns):
