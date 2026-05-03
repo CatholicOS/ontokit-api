@@ -284,7 +284,10 @@ LINT_LEVEL_DEFINITIONS: dict[int, LintLevelDefinition] = {
     ),
     2: LintLevelDefinition(
         "Consistency",
-        "Orphan classes, duplicate triples, and disjointness violations",
+        (
+            "Orphan classes, duplicate triples, disjointness violations, "
+            "orphan individuals, deprecated parent classes"
+        ),
         LINT_LEVELS[2],
     ),
     3: LintLevelDefinition(
@@ -294,7 +297,10 @@ LINT_LEVEL_DEFINITIONS: dict[int, LintLevelDefinition] = {
     ),
     4: LintLevelDefinition(
         "Quality",
-        "Comments, per-language label checks, and redundant regional variants",
+        (
+            "Comments, per-language label checks, redundant regional variants, "
+            "unused properties, empty domain/range, multi-root warnings"
+        ),
         LINT_LEVELS[4],
     ),
     5: LintLevelDefinition(
