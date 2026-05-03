@@ -221,10 +221,10 @@ async def test_undefined_parent() -> None:
     # Parent is NOT declared as an owl:Class in the graph
     g.add((EX.Child, RDFS.subClassOf, EX.Phantom))
 
-    linter = OntologyLinter(enabled_rules={"undefined-parent"})
+    linter = OntologyLinter(enabled_rules={"dangling-ref"})
     issues = await linter.lint(g, PROJECT_ID)
 
-    matches = _results_with_rule(issues, "undefined-parent")
+    matches = _results_with_rule(issues, "dangling-ref")
     assert len(matches) == 1
     assert matches[0].issue_type == "error"
     assert matches[0].subject_iri == str(EX.Child)
@@ -239,10 +239,10 @@ async def test_no_undefined_parent_when_defined() -> None:
     g.add((EX.Child, RDF.type, OWL.Class))
     g.add((EX.Child, RDFS.subClassOf, EX.Parent))
 
-    linter = OntologyLinter(enabled_rules={"undefined-parent"})
+    linter = OntologyLinter(enabled_rules={"dangling-ref"})
     issues = await linter.lint(g, PROJECT_ID)
 
-    matches = _results_with_rule(issues, "undefined-parent")
+    matches = _results_with_rule(issues, "dangling-ref")
     assert len(matches) == 0
 
 
@@ -283,7 +283,7 @@ async def test_lint_all_rules() -> None:
         "circular-hierarchy",
         "empty-label",
         "duplicate-label",
-        "undefined-parent",
+        "dangling-ref",
     ):
         assert _results_with_rule(issues, rule_id) == [], f"Unexpected issue for rule '{rule_id}'"
 

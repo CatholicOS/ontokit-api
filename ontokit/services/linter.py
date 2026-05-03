@@ -68,11 +68,11 @@ LINT_RULES: list[LintRuleInfo] = [
         scope=["class"],
     ),
     LintRuleInfo(
-        rule_id="undefined-parent",
-        name="Undefined Parent",
-        description="Class references a parent that is not defined in the ontology",
+        rule_id="dangling-ref",
+        name="Dangling Reference",
+        description="Reference to a URI not defined in the ontology (in subClassOf, rdfs:domain, or rdfs:range)",
         severity=LintIssueType.ERROR.value,
-        scope=["class"],
+        scope=["class", "property"],
     ),
     LintRuleInfo(
         rule_id="circular-hierarchy",
@@ -230,7 +230,7 @@ LINT_RULES: list[LintRuleInfo] = [
 LINT_RULES_MAP: dict[str, LintRuleInfo] = {rule.rule_id: rule for rule in LINT_RULES}
 
 # Progressive lint levels — each level cumulatively includes the previous
-_LEVEL_1_RULES: set[str] = {"undefined-parent", "circular-hierarchy", "undefined-prefix"}
+_LEVEL_1_RULES: set[str] = {"dangling-ref", "circular-hierarchy", "undefined-prefix"}
 _LEVEL_2_RULES: set[str] = _LEVEL_1_RULES | {
     "orphan-class",
     "duplicate-triple",
@@ -279,7 +279,7 @@ class LintLevelDefinition(NamedTuple):
 LINT_LEVEL_DEFINITIONS: dict[int, LintLevelDefinition] = {
     1: LintLevelDefinition(
         "Critical",
-        "Undefined parents, circular hierarchies, undefined prefixes",
+        "Dangling references, circular hierarchies, undefined prefixes",
         LINT_LEVELS[1],
     ),
     2: LintLevelDefinition(
@@ -441,7 +441,7 @@ class OntologyLinter:
 
         return issues
 
-    async def _check_undefined_parent(self, graph: Graph) -> list[LintResult]:
+    async def _check_dangling_ref(self, graph: Graph) -> list[LintResult]:
         """Find classes that reference undefined parent classes."""
         issues = []
 
@@ -467,7 +467,7 @@ class OntologyLinter:
                     issues.append(
                         LintResult(
                             issue_type=LintIssueType.ERROR.value,
-                            rule_id="undefined-parent",
+                            rule_id="dangling-ref",
                             message="References undefined parent class",
                             subject_iri=str(class_uri),
                             subject_type="class",
