@@ -181,6 +181,13 @@ LINT_RULES: list[LintRuleInfo] = [
         severity=LintIssueType.WARNING.value,
         scope=_ALL,
     ),
+    LintRuleInfo(
+        rule_id="unused-property",
+        name="Unused Property",
+        description="Property is declared but never used as a predicate in any triple",
+        severity=LintIssueType.WARNING.value,
+        scope=["property"],
+    ),
 ]
 
 # Map rule IDs to their info
@@ -205,6 +212,7 @@ _LEVEL_4_RULES: set[str] = _LEVEL_3_RULES | {
     "missing-comment",
     "label-per-language",
     "redundant-regional-label",
+    "unused-property",
 }
 _LEVEL_5_RULES: set[str] = {r.rule_id for r in LINT_RULES}
 
@@ -1292,6 +1300,39 @@ class OntologyLinter:
                     )
                 )
 
+        return issues
+
+    async def _check_unused_property(self, graph: Graph) -> list[LintResult]:
+        """Find declared properties that are never used as a predicate."""
+        issues: list[LintResult] = []
+        property_types = (
+            OWL.ObjectProperty,
+            OWL.DatatypeProperty,
+            OWL.AnnotationProperty,
+            RDF.Property,
+        )
+        seen: set[URIRef] = set()
+        for prop_type in property_types:
+            for prop in graph.subjects(RDF.type, prop_type):
+                if not isinstance(prop, URIRef) or prop in seen:
+                    continue
+                seen.add(prop)
+                # `subjects(prop, None)` returns subjects of triples whose
+                # predicate is `prop`. Excluding `prop` itself is necessary
+                # because the rdf:type triple has the property as subject and
+                # would otherwise count as self-usage.
+                used = any(s != prop for s in graph.subjects(prop, None))
+                if not used:
+                    issues.append(
+                        LintResult(
+                            issue_type=LintIssueType.WARNING.value,
+                            rule_id="unused-property",
+                            message="Property is declared but never used as a predicate",
+                            subject_iri=str(prop),
+                            subject_type="property",
+                            details={"local_name": self._get_local_name(prop)},
+                        )
+                    )
         return issues
 
     @staticmethod

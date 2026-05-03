@@ -912,3 +912,49 @@ async def test_undefined_prefix_subject_type_reflects_entity() -> None:
     ]
     assert matches, "expected an undefined-prefix issue for the bad class IRI"
     assert matches[0].subject_type == "class"
+
+
+# ---------------------------------------------------------------------------
+# unused-property
+# ---------------------------------------------------------------------------
+
+
+async def test_unused_property_flags_property_with_no_usage() -> None:
+    """An ObjectProperty declared but never used as a predicate is flagged."""
+    g = Graph()
+    g.add((EX.knows, RDF.type, OWL.ObjectProperty))
+    # No (?, EX.knows, ?) triples anywhere.
+
+    linter = OntologyLinter(enabled_rules={"unused-property"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "unused-property")
+    assert len(matches) == 1
+    assert matches[0].issue_type == "warning"
+    assert matches[0].subject_iri == str(EX.knows)
+    assert matches[0].subject_type == "property"
+
+
+async def test_unused_property_does_not_flag_used_property() -> None:
+    """A property used as a predicate at least once is not flagged."""
+    g = Graph()
+    g.add((EX.knows, RDF.type, OWL.ObjectProperty))
+    g.add((EX.Alice, EX.knows, EX.Bob))
+
+    linter = OntologyLinter(enabled_rules={"unused-property"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "unused-property") == []
+
+
+async def test_unused_property_covers_datatype_and_annotation_properties() -> None:
+    """DatatypeProperty and AnnotationProperty are also covered."""
+    g = Graph()
+    g.add((EX.age, RDF.type, OWL.DatatypeProperty))
+    g.add((EX.note, RDF.type, OWL.AnnotationProperty))
+
+    linter = OntologyLinter(enabled_rules={"unused-property"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    flagged_iris = {r.subject_iri for r in _results_with_rule(issues, "unused-property")}
+    assert flagged_iris == {str(EX.age), str(EX.note)}
