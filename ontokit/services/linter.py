@@ -613,12 +613,15 @@ class OntologyLinter:
                 label_str = str(label).strip()
                 if not label_str:
                     continue
-                key = (etype, label_str.lower(), label.language)
-                groups[key].append(str(subject))
-                original_label_for.setdefault(str(subject), label_str)
+                lang_key = label.language.lower() if label.language else None
+                key = (etype, label_str.lower(), lang_key)
+                subj_iri = str(subject)
+                if subj_iri not in groups[key]:
+                    groups[key].append(subj_iri)
+                original_label_for.setdefault(subj_iri, label_str)
 
         reported_iris: set[str] = set()
-        for (_etype, _lower, lang), iris in groups.items():
+        for (etype, _lower, lang), iris in groups.items():
             if len(iris) < 2:
                 continue
             for iri in iris:
@@ -637,7 +640,7 @@ class OntologyLinter:
                             f"{len(others)} other resource(s) of the same type"
                         ),
                         subject_iri=iri,
-                        subject_type=self._determine_entity_type(graph, URIRef(iri)),
+                        subject_type=etype,
                         details={
                             "local_name": self._get_local_name(URIRef(iri)),
                             "label": shown_label,

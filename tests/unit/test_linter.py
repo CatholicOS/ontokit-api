@@ -1301,6 +1301,8 @@ async def test_duplicate_label_case_insensitive_within_classes() -> None:
 
     matches = _results_with_rule(issues, "duplicate-label")
     assert {m.subject_iri for m in matches} == {str(EX.A), str(EX.B)}
+    for m in matches:
+        assert m.subject_type == "class"
 
 
 async def test_duplicate_label_flags_property_duplicates() -> None:
@@ -1333,6 +1335,8 @@ async def test_duplicate_label_flags_individual_duplicates() -> None:
 
     matches = _results_with_rule(issues, "duplicate-label")
     assert {m.subject_iri for m in matches} == {str(EX.alice1), str(EX.alice2)}
+    for m in matches:
+        assert m.subject_type == "individual"
 
 
 async def test_duplicate_label_does_not_flag_across_entity_types() -> None:
