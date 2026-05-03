@@ -1012,3 +1012,56 @@ async def test_orphan_individual_emits_one_finding_per_undeclared_type() -> None
         (str(EX.Alice), str(EX.Person)),
         (str(EX.Alice), str(EX.Employee)),
     }
+
+
+# ---------------------------------------------------------------------------
+# 26. empty-domain
+# ---------------------------------------------------------------------------
+
+
+async def test_empty_domain_flags_object_property_without_domain() -> None:
+    g = Graph()
+    g.add((EX.knows, RDF.type, OWL.ObjectProperty))
+
+    linter = OntologyLinter(enabled_rules={"empty-domain"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "empty-domain")
+    assert len(matches) == 1
+    assert matches[0].issue_type == "info"
+    assert matches[0].subject_iri == str(EX.knows)
+    assert matches[0].subject_type == "property"
+
+
+async def test_empty_domain_flags_datatype_property_without_domain() -> None:
+    g = Graph()
+    g.add((EX.age, RDF.type, OWL.DatatypeProperty))
+
+    linter = OntologyLinter(enabled_rules={"empty-domain"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "empty-domain")
+    assert len(matches) == 1
+    assert matches[0].subject_iri == str(EX.age)
+
+
+async def test_empty_domain_does_not_flag_property_with_domain() -> None:
+    g = Graph()
+    g.add((EX.knows, RDF.type, OWL.ObjectProperty))
+    g.add((EX.knows, RDFS.domain, EX.Person))
+
+    linter = OntologyLinter(enabled_rules={"empty-domain"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "empty-domain") == []
+
+
+async def test_empty_domain_does_not_flag_annotation_property() -> None:
+    """AnnotationProperty is excluded from the empty-domain check."""
+    g = Graph()
+    g.add((EX.note, RDF.type, OWL.AnnotationProperty))
+
+    linter = OntologyLinter(enabled_rules={"empty-domain"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "empty-domain") == []

@@ -195,6 +195,13 @@ LINT_RULES: list[LintRuleInfo] = [
         severity=LintIssueType.WARNING.value,
         scope=["individual"],
     ),
+    LintRuleInfo(
+        rule_id="empty-domain",
+        name="Empty Domain",
+        description="ObjectProperty or DatatypeProperty has no rdfs:domain",
+        severity=LintIssueType.INFO.value,
+        scope=["property"],
+    ),
 ]
 
 # Map rule IDs to their info
@@ -221,6 +228,7 @@ _LEVEL_4_RULES: set[str] = _LEVEL_3_RULES | {
     "label-per-language",
     "redundant-regional-label",
     "unused-property",
+    "empty-domain",
 }
 _LEVEL_5_RULES: set[str] = {r.rule_id for r in LINT_RULES}
 
@@ -1372,6 +1380,27 @@ class OntologyLinter:
                             "undeclared_type": str(type_target),
                             "undeclared_type_local": self._get_local_name(type_target),
                         },
+                    )
+                )
+        return issues
+
+    async def _check_empty_domain(self, graph: Graph) -> list[LintResult]:
+        """Flag ObjectProperty/DatatypeProperty declarations with no rdfs:domain."""
+        issues: list[LintResult] = []
+        for prop_type in (OWL.ObjectProperty, OWL.DatatypeProperty):
+            for prop in graph.subjects(RDF.type, prop_type):
+                if not isinstance(prop, URIRef):
+                    continue
+                if any(graph.objects(prop, RDFS.domain)):
+                    continue
+                issues.append(
+                    LintResult(
+                        issue_type=LintIssueType.INFO.value,
+                        rule_id="empty-domain",
+                        message="Property has no rdfs:domain",
+                        subject_iri=str(prop),
+                        subject_type="property",
+                        details={"local_name": self._get_local_name(prop)},
                     )
                 )
         return issues
