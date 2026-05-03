@@ -1065,3 +1065,32 @@ async def test_empty_domain_does_not_flag_annotation_property() -> None:
     issues = await linter.lint(g, PROJECT_ID)
 
     assert _results_with_rule(issues, "empty-domain") == []
+
+
+# ---------------------------------------------------------------------------
+# 27. empty-range
+# ---------------------------------------------------------------------------
+
+
+async def test_empty_range_flags_object_property_without_range() -> None:
+    g = Graph()
+    g.add((EX.knows, RDF.type, OWL.ObjectProperty))
+
+    linter = OntologyLinter(enabled_rules={"empty-range"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "empty-range")
+    assert len(matches) == 1
+    assert matches[0].issue_type == "info"
+    assert matches[0].subject_iri == str(EX.knows)
+
+
+async def test_empty_range_does_not_flag_property_with_range() -> None:
+    g = Graph()
+    g.add((EX.age, RDF.type, OWL.DatatypeProperty))
+    g.add((EX.age, RDFS.range, XSD.integer))
+
+    linter = OntologyLinter(enabled_rules={"empty-range"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "empty-range") == []

@@ -202,6 +202,13 @@ LINT_RULES: list[LintRuleInfo] = [
         severity=LintIssueType.INFO.value,
         scope=["property"],
     ),
+    LintRuleInfo(
+        rule_id="empty-range",
+        name="Empty Range",
+        description="ObjectProperty or DatatypeProperty has no rdfs:range",
+        severity=LintIssueType.INFO.value,
+        scope=["property"],
+    ),
 ]
 
 # Map rule IDs to their info
@@ -229,6 +236,7 @@ _LEVEL_4_RULES: set[str] = _LEVEL_3_RULES | {
     "redundant-regional-label",
     "unused-property",
     "empty-domain",
+    "empty-range",
 }
 _LEVEL_5_RULES: set[str] = {r.rule_id for r in LINT_RULES}
 
@@ -1398,6 +1406,27 @@ class OntologyLinter:
                         issue_type=LintIssueType.INFO.value,
                         rule_id="empty-domain",
                         message="Property has no rdfs:domain",
+                        subject_iri=str(prop),
+                        subject_type="property",
+                        details={"local_name": self._get_local_name(prop)},
+                    )
+                )
+        return issues
+
+    async def _check_empty_range(self, graph: Graph) -> list[LintResult]:
+        """Flag ObjectProperty/DatatypeProperty declarations with no rdfs:range."""
+        issues: list[LintResult] = []
+        for prop_type in (OWL.ObjectProperty, OWL.DatatypeProperty):
+            for prop in graph.subjects(RDF.type, prop_type):
+                if not isinstance(prop, URIRef):
+                    continue
+                if any(graph.objects(prop, RDFS.range)):
+                    continue
+                issues.append(
+                    LintResult(
+                        issue_type=LintIssueType.INFO.value,
+                        rule_id="empty-range",
+                        message="Property has no rdfs:range",
                         subject_iri=str(prop),
                         subject_type="property",
                         details={"local_name": self._get_local_name(prop)},
