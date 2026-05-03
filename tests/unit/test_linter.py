@@ -276,7 +276,7 @@ async def test_lint_all_rules() -> None:
     issues = await linter.lint(g, PROJECT_ID)
 
     # No missing-label, missing-comment, orphan, circular, empty, duplicate,
-    # or undefined-parent issues expected
+    # or dangling-ref issues expected
     for rule_id in (
         "missing-label",
         "missing-comment",

@@ -442,7 +442,11 @@ class OntologyLinter:
         return issues
 
     async def _check_dangling_ref(self, graph: Graph) -> list[LintResult]:
-        """Find classes that reference undefined parent classes."""
+        """Find references to URIs not defined in the ontology.
+
+        Currently checks subClassOf targets; domain and range coverage is
+        added in the next commit.
+        """
         issues = []
 
         # Build set of all defined classes
