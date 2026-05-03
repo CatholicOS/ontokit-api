@@ -188,6 +188,13 @@ LINT_RULES: list[LintRuleInfo] = [
         severity=LintIssueType.WARNING.value,
         scope=["property"],
     ),
+    LintRuleInfo(
+        rule_id="orphan-individual",
+        name="Orphan Individual",
+        description="Individual's rdf:type target is not declared as owl:Class in this ontology",
+        severity=LintIssueType.WARNING.value,
+        scope=["individual"],
+    ),
 ]
 
 # Map rule IDs to their info
@@ -200,6 +207,7 @@ _LEVEL_2_RULES: set[str] = _LEVEL_1_RULES | {
     "duplicate-triple",
     "disjoint-violation",
     "missing-type-declaration",
+    "orphan-individual",
 }
 _LEVEL_3_RULES: set[str] = _LEVEL_2_RULES | {
     "missing-label",
@@ -1333,6 +1341,39 @@ class OntologyLinter:
                             details={"local_name": self._get_local_name(prop)},
                         )
                     )
+        return issues
+
+    async def _check_orphan_individual(self, graph: Graph) -> list[LintResult]:
+        """Flag individuals whose rdf:type target is not declared as owl:Class."""
+        issues: list[LintResult] = []
+        declared_classes = {c for c in graph.subjects(RDF.type, OWL.Class) if isinstance(c, URIRef)}
+        # owl:Thing is implicitly a class even if not declared.
+        declared_classes.add(OWL.Thing)
+
+        for ind in graph.subjects(RDF.type, OWL.NamedIndividual):
+            if not isinstance(ind, URIRef):
+                continue
+            for type_target in graph.objects(ind, RDF.type):
+                if not isinstance(type_target, URIRef):
+                    continue
+                if type_target == OWL.NamedIndividual:
+                    continue
+                if type_target in declared_classes:
+                    continue
+                issues.append(
+                    LintResult(
+                        issue_type=LintIssueType.WARNING.value,
+                        rule_id="orphan-individual",
+                        message=f"Individual's type {type_target} is not declared as owl:Class",
+                        subject_iri=str(ind),
+                        subject_type="individual",
+                        details={
+                            "local_name": self._get_local_name(ind),
+                            "undeclared_type": str(type_target),
+                            "undeclared_type_local": self._get_local_name(type_target),
+                        },
+                    )
+                )
         return issues
 
     @staticmethod

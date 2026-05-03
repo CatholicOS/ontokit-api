@@ -958,3 +958,57 @@ async def test_unused_property_covers_datatype_and_annotation_properties() -> No
 
     flagged_iris = {r.subject_iri for r in _results_with_rule(issues, "unused-property")}
     assert flagged_iris == {str(EX.age), str(EX.note)}
+
+
+# ---------------------------------------------------------------------------
+# 25. orphan-individual
+# ---------------------------------------------------------------------------
+
+
+async def test_orphan_individual_flags_undeclared_type() -> None:
+    """Individual whose rdf:type target is not declared as owl:Class is flagged."""
+    g = Graph()
+    g.add((EX.Alice, RDF.type, OWL.NamedIndividual))
+    g.add((EX.Alice, RDF.type, EX.Person))  # EX.Person is NOT declared as a class
+
+    linter = OntologyLinter(enabled_rules={"orphan-individual"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "orphan-individual")
+    assert len(matches) == 1
+    assert matches[0].issue_type == "warning"
+    assert matches[0].subject_iri == str(EX.Alice)
+    assert matches[0].subject_type == "individual"
+    assert matches[0].details is not None
+    assert matches[0].details["undeclared_type"] == str(EX.Person)
+
+
+async def test_orphan_individual_does_not_flag_declared_type() -> None:
+    """Individual whose rdf:type target is a declared class is not flagged."""
+    g = Graph()
+    g.add((EX.Person, RDF.type, OWL.Class))
+    g.add((EX.Alice, RDF.type, OWL.NamedIndividual))
+    g.add((EX.Alice, RDF.type, EX.Person))
+
+    linter = OntologyLinter(enabled_rules={"orphan-individual"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "orphan-individual") == []
+
+
+async def test_orphan_individual_emits_one_finding_per_undeclared_type() -> None:
+    """An individual with two undeclared types yields two findings."""
+    g = Graph()
+    g.add((EX.Alice, RDF.type, OWL.NamedIndividual))
+    g.add((EX.Alice, RDF.type, EX.Person))
+    g.add((EX.Alice, RDF.type, EX.Employee))
+
+    linter = OntologyLinter(enabled_rules={"orphan-individual"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "orphan-individual")
+    flagged = {(m.subject_iri, m.details["undeclared_type"]) for m in matches if m.details}
+    assert flagged == {
+        (str(EX.Alice), str(EX.Person)),
+        (str(EX.Alice), str(EX.Employee)),
+    }
