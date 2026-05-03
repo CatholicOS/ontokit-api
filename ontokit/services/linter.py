@@ -12,6 +12,7 @@ from rdflib import Literal as RDFLiteral
 from rdflib.namespace import OWL, RDF, RDFS, SKOS, XSD
 
 from ontokit.models.lint import LintIssueType
+from ontokit.services.rdf_utils import is_deprecated
 
 DC = Namespace("http://purl.org/dc/elements/1.1/")
 DCTERMS = Namespace("http://purl.org/dc/terms/")
@@ -209,6 +210,13 @@ LINT_RULES: list[LintRuleInfo] = [
         severity=LintIssueType.INFO.value,
         scope=["property"],
     ),
+    LintRuleInfo(
+        rule_id="deprecated-parent",
+        name="Deprecated Parent",
+        description="Class subclasses a class marked owl:deprecated",
+        severity=LintIssueType.WARNING.value,
+        scope=["class"],
+    ),
 ]
 
 # Map rule IDs to their info
@@ -222,6 +230,7 @@ _LEVEL_2_RULES: set[str] = _LEVEL_1_RULES | {
     "disjoint-violation",
     "missing-type-declaration",
     "orphan-individual",
+    "deprecated-parent",
 }
 _LEVEL_3_RULES: set[str] = _LEVEL_2_RULES | {
     "missing-label",
@@ -1430,6 +1439,33 @@ class OntologyLinter:
                         subject_iri=str(prop),
                         subject_type="property",
                         details={"local_name": self._get_local_name(prop)},
+                    )
+                )
+        return issues
+
+    async def _check_deprecated_parent(self, graph: Graph) -> list[LintResult]:
+        """Flag classes that subclass an owl:deprecated class."""
+        issues: list[LintResult] = []
+        for cls in graph.subjects(RDF.type, OWL.Class):
+            if not isinstance(cls, URIRef):
+                continue
+            for parent in graph.objects(cls, RDFS.subClassOf):
+                if not isinstance(parent, URIRef):
+                    continue
+                if not is_deprecated(graph, parent):
+                    continue
+                issues.append(
+                    LintResult(
+                        issue_type=LintIssueType.WARNING.value,
+                        rule_id="deprecated-parent",
+                        message=f"Parent class {parent} is deprecated",
+                        subject_iri=str(cls),
+                        subject_type="class",
+                        details={
+                            "local_name": self._get_local_name(cls),
+                            "deprecated_parent": str(parent),
+                            "deprecated_parent_local": self._get_local_name(parent),
+                        },
                     )
                 )
         return issues

@@ -1094,3 +1094,53 @@ async def test_empty_range_does_not_flag_property_with_range() -> None:
     issues = await linter.lint(g, PROJECT_ID)
 
     assert _results_with_rule(issues, "empty-range") == []
+
+
+# ---------------------------------------------------------------------------
+# 28. deprecated-parent
+# ---------------------------------------------------------------------------
+
+
+async def test_deprecated_parent_flags_subclass_of_deprecated_class() -> None:
+    g = Graph()
+    g.add((EX.OldThing, RDF.type, OWL.Class))
+    g.add((EX.OldThing, OWL.deprecated, Literal(True)))
+    g.add((EX.NewThing, RDF.type, OWL.Class))
+    g.add((EX.NewThing, RDFS.subClassOf, EX.OldThing))
+
+    linter = OntologyLinter(enabled_rules={"deprecated-parent"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "deprecated-parent")
+    assert len(matches) == 1
+    assert matches[0].issue_type == "warning"
+    assert matches[0].subject_iri == str(EX.NewThing)
+    assert matches[0].subject_type == "class"
+    assert matches[0].details is not None
+    assert matches[0].details["deprecated_parent"] == str(EX.OldThing)
+
+
+async def test_deprecated_parent_does_not_flag_non_deprecated_parent() -> None:
+    g = Graph()
+    g.add((EX.Animal, RDF.type, OWL.Class))
+    g.add((EX.Dog, RDF.type, OWL.Class))
+    g.add((EX.Dog, RDFS.subClassOf, EX.Animal))
+
+    linter = OntologyLinter(enabled_rules={"deprecated-parent"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "deprecated-parent") == []
+
+
+async def test_deprecated_parent_recognizes_string_true() -> None:
+    """is_deprecated accepts case-insensitive 'true' / '1' literals."""
+    g = Graph()
+    g.add((EX.OldThing, RDF.type, OWL.Class))
+    g.add((EX.OldThing, OWL.deprecated, Literal("true")))
+    g.add((EX.NewThing, RDF.type, OWL.Class))
+    g.add((EX.NewThing, RDFS.subClassOf, EX.OldThing))
+
+    linter = OntologyLinter(enabled_rules={"deprecated-parent"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert len(_results_with_rule(issues, "deprecated-parent")) == 1
