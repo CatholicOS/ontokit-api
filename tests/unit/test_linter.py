@@ -1365,3 +1365,28 @@ async def test_duplicate_label_separates_languages() -> None:
     issues = await linter.lint(g, PROJECT_ID)
 
     assert _results_with_rule(issues, "duplicate-label") == []
+
+
+# ---------------------------------------------------------------------------
+# 32. Level membership for new and renamed rules (#99)
+# ---------------------------------------------------------------------------
+
+
+def test_lint_levels_include_new_and_renamed_rules() -> None:
+    """Each rule introduced or renamed in #99 is in the expected lint level."""
+    from ontokit.services.linter import LINT_LEVELS
+
+    # L1 — dangling-ref replaces undefined-parent.
+    assert "dangling-ref" in LINT_LEVELS[1]
+    assert "undefined-parent" not in LINT_LEVELS[1]
+    assert "undefined-parent" not in LINT_LEVELS[5]
+
+    # L2 — orphan-individual and deprecated-parent join existing consistency rules.
+    assert "orphan-individual" in LINT_LEVELS[2]
+    assert "deprecated-parent" in LINT_LEVELS[2]
+
+    # L4 — quality-style additions.
+    assert "unused-property" in LINT_LEVELS[4]
+    assert "empty-domain" in LINT_LEVELS[4]
+    assert "empty-range" in LINT_LEVELS[4]
+    assert "multi-root" in LINT_LEVELS[4]
