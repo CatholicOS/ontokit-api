@@ -1281,3 +1281,83 @@ async def test_dangling_ref_skips_imported_namespaces() -> None:
     issues = await linter.lint(g, PROJECT_ID)
 
     assert _results_with_rule(issues, "dangling-ref") == []
+
+
+# ---------------------------------------------------------------------------
+# 31. duplicate-label (broader semantics)
+# ---------------------------------------------------------------------------
+
+
+async def test_duplicate_label_case_insensitive_within_classes() -> None:
+    """Existing behavior preserved: classes with same label (any case) flagged."""
+    g = Graph()
+    g.add((EX.A, RDF.type, OWL.Class))
+    g.add((EX.A, RDFS.label, Literal("Animal", lang="en")))
+    g.add((EX.B, RDF.type, OWL.Class))
+    g.add((EX.B, RDFS.label, Literal("ANIMAL", lang="en")))
+
+    linter = OntologyLinter(enabled_rules={"duplicate-label"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "duplicate-label")
+    assert {m.subject_iri for m in matches} == {str(EX.A), str(EX.B)}
+
+
+async def test_duplicate_label_flags_property_duplicates() -> None:
+    """Two ObjectProperties sharing a label (case-insensitive) are flagged."""
+    g = Graph()
+    g.add((EX.knows, RDF.type, OWL.ObjectProperty))
+    g.add((EX.knows, RDFS.label, Literal("knows", lang="en")))
+    g.add((EX.acquaintedWith, RDF.type, OWL.ObjectProperty))
+    g.add((EX.acquaintedWith, RDFS.label, Literal("Knows", lang="en")))
+
+    linter = OntologyLinter(enabled_rules={"duplicate-label"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "duplicate-label")
+    assert {m.subject_iri for m in matches} == {str(EX.knows), str(EX.acquaintedWith)}
+    for m in matches:
+        assert m.subject_type == "property"
+
+
+async def test_duplicate_label_flags_individual_duplicates() -> None:
+    g = Graph()
+    g.add((EX.Person, RDF.type, OWL.Class))
+    g.add((EX.alice1, RDF.type, EX.Person))
+    g.add((EX.alice1, RDFS.label, Literal("Alice", lang="en")))
+    g.add((EX.alice2, RDF.type, EX.Person))
+    g.add((EX.alice2, RDFS.label, Literal("alice", lang="en")))
+
+    linter = OntologyLinter(enabled_rules={"duplicate-label"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "duplicate-label")
+    assert {m.subject_iri for m in matches} == {str(EX.alice1), str(EX.alice2)}
+
+
+async def test_duplicate_label_does_not_flag_across_entity_types() -> None:
+    """A class and a property sharing a label are NOT cross-flagged."""
+    g = Graph()
+    g.add((EX.Knows, RDF.type, OWL.Class))
+    g.add((EX.Knows, RDFS.label, Literal("knows", lang="en")))
+    g.add((EX.knows, RDF.type, OWL.ObjectProperty))
+    g.add((EX.knows, RDFS.label, Literal("Knows", lang="en")))
+
+    linter = OntologyLinter(enabled_rules={"duplicate-label"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "duplicate-label") == []
+
+
+async def test_duplicate_label_separates_languages() -> None:
+    """Same label string in different languages is not a duplicate."""
+    g = Graph()
+    g.add((EX.A, RDF.type, OWL.Class))
+    g.add((EX.A, RDFS.label, Literal("Hund", lang="de")))
+    g.add((EX.B, RDF.type, OWL.Class))
+    g.add((EX.B, RDFS.label, Literal("Hund", lang="en")))
+
+    linter = OntologyLinter(enabled_rules={"duplicate-label"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "duplicate-label") == []

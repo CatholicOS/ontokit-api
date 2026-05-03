@@ -91,7 +91,7 @@ LINT_RULES: list[LintRuleInfo] = [
     LintRuleInfo(
         rule_id="duplicate-label",
         name="Duplicate Label",
-        description="Multiple resources share the same label, which may cause confusion",
+        description="Multiple resources of the same entity type share the same label (case-insensitive, per language)",
         severity=LintIssueType.WARNING.value,
         scope=_ALL,
     ),
@@ -594,47 +594,59 @@ class OntologyLinter:
         return issues
 
     async def _check_duplicate_label(self, graph: Graph) -> list[LintResult]:
-        """Find resources that share the same label."""
-        issues = []
+        """Find resources of the same entity type sharing a label (case-insensitive, per language)."""
+        issues: list[LintResult] = []
 
-        # Build map of label → list of resource IRIs
-        label_to_resources: dict[str, list[str]] = defaultdict(list)
+        # Group by (entity_type, label_lower, lang) → list of resource IRIs.
+        # Skip resources whose entity_type is "other" — we only group concrete
+        # types that the schema knows how to navigate.
+        groups: dict[tuple[str, str, str | None], list[str]] = defaultdict(list)
+        original_label_for: dict[str, str] = {}
 
         for subject in self._uri_subjects:
+            etype = self._determine_entity_type(graph, subject)
+            if etype == "other":
+                continue
             for label in graph.objects(subject, RDFS.label):
-                if isinstance(label, RDFLiteral):
-                    label_str = str(label).strip().lower()
-                    if label_str:  # Skip empty labels
-                        label_to_resources[label_str].append(str(subject))
+                if not isinstance(label, RDFLiteral):
+                    continue
+                label_str = str(label).strip()
+                if not label_str:
+                    continue
+                key = (etype, label_str.lower(), label.language)
+                groups[key].append(str(subject))
+                original_label_for.setdefault(str(subject), label_str)
 
-        # Report duplicates
         reported_iris: set[str] = set()
-        for _label_str, resource_iris in label_to_resources.items():
-            if len(resource_iris) > 1:
-                for resource_iri in resource_iris:
-                    if resource_iri not in reported_iris:
-                        reported_iris.add(resource_iri)
-                        # Get original (non-lowercased) label
-                        original_label = self._get_label(graph, URIRef(resource_iri))
-                        other_resources = [c for c in resource_iris if c != resource_iri]
-                        issues.append(
-                            LintResult(
-                                issue_type=LintIssueType.WARNING.value,
-                                rule_id="duplicate-label",
-                                message=f"Label '{original_label}' is shared with {len(other_resources)} other resource(s)",
-                                subject_iri=resource_iri,
-                                subject_type=self._determine_entity_type(
-                                    graph, URIRef(resource_iri)
-                                ),
-                                details={
-                                    "local_name": self._get_local_name(URIRef(resource_iri)),
-                                    "label": original_label,
-                                    "duplicate_iris": other_resources[:5],  # Limit to 5
-                                    "total_duplicates": len(other_resources),
-                                },
-                            )
-                        )
-
+        for (_etype, _lower, lang), iris in groups.items():
+            if len(iris) < 2:
+                continue
+            for iri in iris:
+                if iri in reported_iris:
+                    continue
+                reported_iris.add(iri)
+                others = [o for o in iris if o != iri]
+                lang_str = f"@{lang}" if lang else ""
+                shown_label = original_label_for[iri]
+                issues.append(
+                    LintResult(
+                        issue_type=LintIssueType.WARNING.value,
+                        rule_id="duplicate-label",
+                        message=(
+                            f'Label "{shown_label}"{lang_str} is shared with '
+                            f"{len(others)} other resource(s) of the same type"
+                        ),
+                        subject_iri=iri,
+                        subject_type=self._determine_entity_type(graph, URIRef(iri)),
+                        details={
+                            "local_name": self._get_local_name(URIRef(iri)),
+                            "label": shown_label,
+                            "language": lang,
+                            "duplicate_iris": others[:5],
+                            "total_duplicates": len(others),
+                        },
+                    )
+                )
         return issues
 
     async def _check_label_per_language(self, graph: Graph) -> list[LintResult]:
