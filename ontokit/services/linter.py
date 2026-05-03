@@ -442,48 +442,72 @@ class OntologyLinter:
         return issues
 
     async def _check_dangling_ref(self, graph: Graph) -> list[LintResult]:
-        """Find references to URIs not defined in the ontology.
+        """Find references to URIs that aren't declared in this ontology.
 
-        Currently checks subClassOf targets; domain and range coverage is
-        added in the next commit.
+        Scans rdfs:subClassOf, rdfs:domain, and rdfs:range. References into
+        well-known vocabularies (rdf/rdfs/owl/xsd/skos/dc/dcterms) and into
+        namespaces brought in via owl:imports are not flagged.
         """
-        issues = []
+        issues: list[LintResult] = []
 
-        # Build set of all defined classes
-        defined_classes = {
-            str(c) for c in graph.subjects(RDF.type, OWL.Class) if isinstance(c, URIRef)
+        # A URI is "known" if it appears as a subject of any rdf:type triple
+        # OR as a subject of any triple at all (covers blank-node-free uses).
+        declared_subjects: set[URIRef] = {
+            s for s in graph.subjects(RDF.type, None) if isinstance(s, URIRef)
         }
-        # Add owl:Thing as it's always implicitly defined
-        defined_classes.add(str(OWL.Thing))
+        all_subjects: set[URIRef] = {s for s in graph.subjects() if isinstance(s, URIRef)}
+        known: set[URIRef] = declared_subjects | all_subjects | {OWL.Thing}
 
-        for class_uri in graph.subjects(RDF.type, OWL.Class):
-            if not isinstance(class_uri, URIRef):
-                continue
+        well_known_ns = {
+            str(RDF),
+            str(RDFS),
+            str(OWL),
+            str(XSD),
+            str(SKOS),
+            str(DC),
+            str(DCTERMS),
+        }
+        imported_ns: set[str] = set()
+        for _ontology, _pred, imported in graph.triples((None, OWL.imports, None)):
+            if isinstance(imported, URIRef):
+                imp_str = str(imported)
+                if not imp_str.endswith(("/", "#")):
+                    imp_str += "/"
+                imported_ns.add(imp_str)
+        external_ns = well_known_ns | imported_ns
 
-            # Check each parent
-            for parent_uri in graph.objects(class_uri, RDFS.subClassOf):
-                if not isinstance(parent_uri, URIRef):
+        # (subject_iri, predicate, target) keyed reporting to deduplicate
+        # when the same triple would be reported by multiple iterations.
+        reported: set[tuple[str, str, str]] = set()
+
+        for predicate in (RDFS.subClassOf, RDFS.domain, RDFS.range):
+            for subj, _p, obj in graph.triples((None, predicate, None)):
+                if not isinstance(obj, URIRef) or not isinstance(subj, URIRef):
                     continue
-
-                parent_str = str(parent_uri)
-                if parent_str not in defined_classes:
-                    label = self._get_label(graph, class_uri)
-                    issues.append(
-                        LintResult(
-                            issue_type=LintIssueType.ERROR.value,
-                            rule_id="dangling-ref",
-                            message="References undefined parent class",
-                            subject_iri=str(class_uri),
-                            subject_type="class",
-                            details={
-                                "local_name": self._get_local_name(class_uri),
-                                "label": label,
-                                "undefined_parent": parent_str,
-                                "undefined_parent_local": self._get_local_name(parent_uri),
-                            },
-                        )
+                if obj == OWL.Thing or obj in known:
+                    continue
+                obj_str = str(obj)
+                if any(obj_str.startswith(ns) for ns in external_ns):
+                    continue
+                key = (str(subj), str(predicate), obj_str)
+                if key in reported:
+                    continue
+                reported.add(key)
+                issues.append(
+                    LintResult(
+                        issue_type=LintIssueType.ERROR.value,
+                        rule_id="dangling-ref",
+                        message=f"References undeclared entity {obj}",
+                        subject_iri=str(subj),
+                        subject_type=self._determine_entity_type(graph, subj),
+                        details={
+                            "local_name": self._get_local_name(subj),
+                            "predicate": str(predicate),
+                            "dangling_target": obj_str,
+                            "dangling_target_local": self._get_local_name(obj),
+                        },
                     )
-
+                )
         return issues
 
     async def _check_circular_hierarchy(self, graph: Graph) -> list[LintResult]:

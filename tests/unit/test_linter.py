@@ -229,7 +229,7 @@ async def test_undefined_parent() -> None:
     assert matches[0].issue_type == "error"
     assert matches[0].subject_iri == str(EX.Child)
     assert matches[0].details is not None
-    assert matches[0].details["undefined_parent"] == str(EX.Phantom)
+    assert matches[0].details["dangling_target"] == str(EX.Phantom)
 
 
 async def test_no_undefined_parent_when_defined() -> None:
@@ -1201,3 +1201,83 @@ async def test_multi_root_excludes_classes_with_explicit_parent() -> None:
     assert matches[0].details is not None
     assert matches[0].details["root_count"] == 6
     assert str(EX.Dog) not in matches[0].details["root_iris"]
+
+
+# ---------------------------------------------------------------------------
+# 30. dangling-ref (domain/range expansion)
+# ---------------------------------------------------------------------------
+
+
+async def test_dangling_ref_flags_undefined_domain() -> None:
+    """Property whose rdfs:domain points to an undeclared URI is flagged."""
+    g = Graph()
+    g.add((EX.knows, RDF.type, OWL.ObjectProperty))
+    g.add((EX.knows, RDFS.domain, EX.UndeclaredClass))
+
+    linter = OntologyLinter(enabled_rules={"dangling-ref"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "dangling-ref")
+    assert len(matches) == 1
+    assert matches[0].subject_iri == str(EX.knows)
+    assert matches[0].details is not None
+    assert matches[0].details["predicate"] == str(RDFS.domain)
+    assert matches[0].details["dangling_target"] == str(EX.UndeclaredClass)
+
+
+async def test_dangling_ref_flags_undefined_range() -> None:
+    g = Graph()
+    g.add((EX.age, RDF.type, OWL.DatatypeProperty))
+    g.add((EX.age, RDFS.range, EX.UndeclaredDatatype))
+
+    linter = OntologyLinter(enabled_rules={"dangling-ref"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "dangling-ref")
+    assert len(matches) == 1
+    assert matches[0].subject_iri == str(EX.age)
+    assert matches[0].details is not None
+    assert matches[0].details["predicate"] == str(RDFS.range)
+
+
+async def test_dangling_ref_subclassof_includes_predicate_detail() -> None:
+    """The existing subClassOf path now also reports details.predicate."""
+    g = Graph()
+    g.add((EX.Dog, RDF.type, OWL.Class))
+    g.add((EX.Dog, RDFS.subClassOf, EX.UndeclaredAnimal))
+
+    linter = OntologyLinter(enabled_rules={"dangling-ref"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    matches = _results_with_rule(issues, "dangling-ref")
+    assert len(matches) == 1
+    assert matches[0].details is not None
+    assert matches[0].details["predicate"] == str(RDFS.subClassOf)
+
+
+async def test_dangling_ref_skips_well_known_namespaces() -> None:
+    """References into rdf/rdfs/owl/xsd/skos/dcterms must not be flagged."""
+    g = Graph()
+    g.add((EX.knows, RDF.type, OWL.ObjectProperty))
+    g.add((EX.knows, RDFS.range, XSD.string))
+    g.add((EX.related, RDF.type, OWL.ObjectProperty))
+    g.add((EX.related, RDFS.range, SKOS.Concept))
+
+    linter = OntologyLinter(enabled_rules={"dangling-ref"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "dangling-ref") == []
+
+
+async def test_dangling_ref_skips_imported_namespaces() -> None:
+    """References into namespaces declared via owl:imports must not be flagged."""
+    g = Graph()
+    imported_ns = URIRef("http://other.org/onto")
+    g.add((URIRef("http://example.org/myonto"), OWL.imports, imported_ns))
+    g.add((EX.knows, RDF.type, OWL.ObjectProperty))
+    g.add((EX.knows, RDFS.range, URIRef("http://other.org/onto/Person")))
+
+    linter = OntologyLinter(enabled_rules={"dangling-ref"})
+    issues = await linter.lint(g, PROJECT_ID)
+
+    assert _results_with_rule(issues, "dangling-ref") == []
