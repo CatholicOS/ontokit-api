@@ -1317,10 +1317,10 @@ class OntologyLinter:
                 if not isinstance(prop, URIRef) or prop in seen:
                     continue
                 seen.add(prop)
-                # `subjects(prop, None)` returns subjects of triples whose
-                # predicate is `prop`. Excluding `prop` itself is necessary
-                # because the rdf:type triple has the property as subject and
-                # would otherwise count as self-usage.
+                # `graph.subjects(prop, None)` returns subjects of triples where `prop`
+                # is the predicate. We exclude the property itself as a subject to avoid
+                # treating a self-referential triple like (prop, prop, X) as evidence
+                # that prop is "used" in any meaningful sense.
                 used = any(s != prop for s in graph.subjects(prop, None))
                 if not used:
                     issues.append(

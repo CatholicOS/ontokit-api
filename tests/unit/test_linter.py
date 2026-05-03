@@ -915,7 +915,7 @@ async def test_undefined_prefix_subject_type_reflects_entity() -> None:
 
 
 # ---------------------------------------------------------------------------
-# unused-property
+# 24. unused-property
 # ---------------------------------------------------------------------------
 
 
