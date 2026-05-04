@@ -38,7 +38,7 @@ jobs:
   # findings show up in the Security tab.
   scan-full:
     if: ${{ github.event_name != 'pull_request' }}
-    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@3d5827dbebf8a3f7ba681e730a8a1b116e8ebddd # v2.3.5
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@43f380b8fc43a816831a9f5ee6fc91170809c7e9 # v2.3.5
     with:
       scan-args: |-
         -r
