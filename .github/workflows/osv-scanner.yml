@@ -28,7 +28,7 @@ jobs:
   # Pre-existing findings stay visible in the scheduled `scan-full` run.
   scan-pr:
     if: ${{ github.event_name == 'pull_request' && github.actor == 'dependabot[bot]' }}
-    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@3d5827dbebf8a3f7ba681e730a8a1b116e8ebddd # v2.3.5
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@43f380b8fc43a816831a9f5ee6fc91170809c7e9 # v2.3.5
     with:
       scan-args: |-
         -r
