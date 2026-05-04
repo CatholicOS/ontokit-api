@@ -23,7 +23,7 @@ classifiers = [
 
 dependencies = [
     "fastapi>=0.136.1",
-    "uvicorn[standard]>=0.44.0",
+    "uvicorn[standard]>=0.46.0",
     "pydantic>=2.13.3,<2.14",
     "pydantic-settings>=2.14.0,<2.15",
     "rdflib>=7.1.0",
