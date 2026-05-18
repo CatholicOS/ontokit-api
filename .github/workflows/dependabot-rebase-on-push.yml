@@ -22,7 +22,7 @@ jobs:
     steps:
       - name: Request rebase on stale dependabot PRs
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.DEPENDABOT_APPROVE_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           mapfile -t prs < <(
