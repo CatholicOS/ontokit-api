@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Request rebase on stale dependabot PRs
         env:
+          # PAT, not GITHUB_TOKEN: comments by github-actions[bot] don't
+          # trigger dependabot's @-command handler.
           GH_TOKEN: ${{ secrets.DEPENDABOT_APPROVE_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
