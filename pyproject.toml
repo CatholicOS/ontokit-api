@@ -35,14 +35,14 @@ dependencies = [
     "arq>=0.28.0",
     "httpx>=0.28.0",
     "passlib[bcrypt]>=1.7.4",
-    "python-multipart>=0.0.29",
+    "python-multipart>=0.0.32",
     "gitpython>=3.1.50",
-    "pygit2>=1.19.2",
+    "pygit2>=1.19.3",
     "pyjwt>=2.13.0",
     "pygithub>=2.9.1",
     "minio>=7.2.0",
     "websockets>=14.0",
-    "slowapi>=0.1.9",
+    "slowapi>=0.1.10",
     "sentence-transformers>=5.5.1",
     "pgvector>=0.3.0",
     "numpy>=2.4.6",
@@ -50,11 +50,11 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pytest>=9.0.3",
+    "pytest>=9.1.0",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
     "httpx>=0.28.0",
-    "ruff>=0.15.15",
+    "ruff>=0.15.17",
     "mypy>=2.1.0",
     "pre-commit>=4.6.0",
 ]
