@@ -6,29 +6,21 @@ repos:
         args: [--fix, --exit-non-zero-on-fix]
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.15.0
+  # Run mypy inside the uv-managed project venv (same command/scope as CI's
+  # `uv run mypy ontokit/`) instead of mirrors-mypy. mirrors-mypy builds a
+  # separate isolated env and reinstalls the full dependency set —
+  # sentence-transformers pulls torch — which made cold runs take 20+ min and
+  # forced a hand-maintained `additional_dependencies` list that drifts from
+  # pyproject.toml. The system hook reuses already-installed deps: no env
+  # build, no parallel list, single source of truth. Strictness and target
+  # Python come from [tool.mypy] in pyproject.toml. See issue #179.
+  - repo: local
     hooks:
       - id: mypy
-        args: [--strict, --python-version=3.11]
-        additional_dependencies:
-          - alembic>=1.14.0
-          - fastapi>=0.115.0
-          - pydantic>=2.10.0
-          - pydantic-settings>=2.6.0
-          - sqlalchemy>=2.0.0
-          - rdflib>=7.1.0
-          - redis>=5.2.0
-          - arq>=0.26.0
-          - httpx>=0.28.0
-          - pyjwt>=2.12.0
-          - pygit2>=1.13.0
-          - gitpython>=3.1.0
-          - minio>=7.2.0
-          - slowapi>=0.1.9
-          - numpy>=2.4.4,<2.5  # cap <2.5: numpy 2.5 stubs use PEP 695 `type`, which mypy rejects under --python-version=3.11
-          - pgvector>=0.3.0
-          - sentence-transformers>=3.0.0
-          - cryptography>=42.0.0
-          - pytest>=8.0.0
-          - pytest-asyncio>=0.24.0
+        name: mypy (strict)
+        entry: uv run mypy ontokit/
+        language: system
+        types: [python]
+        files: ^ontokit/
+        pass_filenames: false
+        require_serial: true
