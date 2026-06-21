@@ -28,8 +28,17 @@ ruff format ontokit/          # Format code
 
 ### Type Checking
 ```bash
-mypy ontokit/
+mypy ontokit/             # authoritative — gates CI & pre-commit
+uv run pyright ontokit/   # advisory — non-gating CI job + IDE
 ```
+
+**mypy is authoritative**: strict mode with the `pydantic.mypy` plugin, run in
+pre-commit and the `lint` CI job — it is the only type checker that gates merges.
+**pyright is advisory**: a `continue-on-error` CI job (issue #134) and the default
+IDE checker. It catches issues mypy misses (possibly-unbound vars, narrowing) but
+lacks mypy's plugin coverage (Pydantic field typing), so when they disagree, mypy
+wins until pyright is promoted to gating. Pyright only recognizes keyword
+defaults — prefer `Field(default=None)` over `Field(None)` in Pydantic schemas.
 
 ### Security Scanning
 
@@ -156,7 +165,8 @@ Environment variables are configured in `.env` (see `.env.example`). Key section
 From pyproject.toml:
 - Line length: 100 characters
 - Ruff rules: E, W, F, I, B, C4, UP, ARG, SIM
-- MyPy: Strict mode enabled, Python 3.11 target
+- MyPy: Strict mode enabled, Python 3.11 target — authoritative, gates CI
+- Pyright: standard mode, advisory only (non-gating CI + IDE); see Type Checking
 
 ## Scripts
 

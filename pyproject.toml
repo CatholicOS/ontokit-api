@@ -57,6 +57,7 @@ dev = [
     "ruff>=0.15.18",
     "mypy>=2.1.0",
     "pre-commit>=4.6.0",
+    "pyright>=1.1.410",
 ]
 
 [project.urls]
@@ -103,6 +104,19 @@ known-first-party = ["ontokit"]
 venvPath = "."
 venv = ".venv"
 pythonVersion = "3.11"
+# Pyright is an advisory (non-gating) checker; mypy (strict, with the pydantic
+# plugin) remains the authoritative gate. Keep pyright at "standard" rather than
+# "strict" — strict-on-strict is redundant noise. The opinionated rules
+# (reportImplicitOverride, reportMissingTypeStubs, reportPrivateUsage) stay at
+# their standard-mode defaults (off). See issue #134.
+typeCheckingMode = "standard"
+include = ["ontokit", "tests"]
+
+# Test fixtures intentionally carry unused symbols (fixture-symmetry params like
+# mock_db, placeholder _args/_kwargs), so don't flag unused variables in tests.
+[[tool.pyright.executionEnvironments]]
+root = "tests"
+reportUnusedVariable = false
 
 [tool.mypy]
 python_version = "3.11"
