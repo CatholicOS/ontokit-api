@@ -40,7 +40,7 @@ class PRCreate(PRBase):
 class PRUpdate(BaseModel):
     """Schema for updating a pull request."""
 
-    title: str | None = Field(None, min_length=1, max_length=500)
+    title: str | None = Field(default=None, min_length=1, max_length=500)
     description: str | None = None
 
 
@@ -86,7 +86,7 @@ class PRListResponse(BaseModel):
 class PRMergeRequest(BaseModel):
     """Schema for merge request body."""
 
-    merge_message: str | None = Field(None, description="Custom merge commit message")
+    merge_message: str | None = Field(default=None, description="Custom merge commit message")
     delete_source_branch: bool = Field(
         default=False, description="Delete source branch after merge"
     )
@@ -145,7 +145,7 @@ class CommentBase(BaseModel):
 class CommentCreate(CommentBase):
     """Schema for creating a comment."""
 
-    parent_id: UUID | None = Field(None, description="Parent comment ID for replies")
+    parent_id: UUID | None = Field(default=None, description="Parent comment ID for replies")
 
 
 class CommentUpdate(BaseModel):
@@ -206,7 +206,7 @@ class BranchCreate(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=255, pattern=r"^[a-zA-Z0-9/_-]+$")
     from_branch: str | None = Field(
-        None, description="Base branch to create from (defaults to current branch)"
+        default=None, description="Base branch to create from (defaults to current branch)"
     )
 
 
@@ -234,18 +234,18 @@ class GitHubIntegrationCreate(BaseModel):
     repo_name: str = Field(..., min_length=1, max_length=255)
     default_branch: str = Field(default="main", min_length=1, max_length=255)
     webhooks_enabled: bool = False
-    ontology_file_path: str | None = Field(None, max_length=500)
-    turtle_file_path: str | None = Field(None, max_length=500)
+    ontology_file_path: str | None = Field(default=None, max_length=500)
+    turtle_file_path: str | None = Field(default=None, max_length=500)
 
 
 class GitHubIntegrationUpdate(BaseModel):
     """Schema for updating GitHub integration."""
 
-    default_branch: str | None = Field(None, min_length=1, max_length=255)
+    default_branch: str | None = Field(default=None, min_length=1, max_length=255)
     sync_enabled: bool | None = None
     webhooks_enabled: bool | None = None
-    ontology_file_path: str | None = Field(None, max_length=500)
-    turtle_file_path: str | None = Field(None, max_length=500)
+    ontology_file_path: str | None = Field(default=None, max_length=500)
+    turtle_file_path: str | None = Field(default=None, max_length=500)
 
 
 class GitHubIntegrationResponse(BaseModel):
@@ -405,9 +405,9 @@ class ProjectCreateFromGitHub(BaseModel):
     repo_owner: str = Field(..., min_length=1, max_length=255)
     repo_name: str = Field(..., min_length=1, max_length=255)
     ontology_file_path: str = Field(..., min_length=1, max_length=500)
-    turtle_file_path: str | None = Field(None, max_length=500)
+    turtle_file_path: str | None = Field(default=None, max_length=500)
     is_public: bool = False
-    name: str | None = Field(None, max_length=255)
+    name: str | None = Field(default=None, max_length=255)
     description: str | None = None
     default_branch: str | None = None
 

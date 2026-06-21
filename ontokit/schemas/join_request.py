@@ -21,7 +21,7 @@ class JoinRequestAction(BaseModel):
     """Schema for admin approve/decline action."""
 
     response_message: str | None = Field(
-        None,
+        default=None,
         max_length=1000,
         description="Optional message from the admin",
     )

@@ -40,11 +40,11 @@ class ProjectCreate(ProjectBase):
 class ProjectUpdate(BaseModel):
     """Schema for updating a project."""
 
-    name: str | None = Field(None, min_length=1, max_length=255)
+    name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=5000)
     is_public: bool | None = None
     label_preferences: list[str] | None = Field(
-        None,
+        default=None,
         description=(
             "Label preferences for ontology display. "
             "Format: ['rdfs:label@en', 'skos:prefLabel', ...]"
@@ -287,7 +287,7 @@ class BranchCreate(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=255)
     from_branch: str | None = Field(
-        None, description="Branch to create from (defaults to current branch)"
+        default=None, description="Branch to create from (defaults to current branch)"
     )
 
 

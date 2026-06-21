@@ -95,7 +95,7 @@ class OWLClassTreeNode(BaseModel):
 
     iri: str = Field(..., description="The class IRI")
     label: str = Field(..., description="Display label (from rdfs:label or local name)")
-    child_count: int = Field(0, description="Number of direct subclasses")
+    child_count: int = Field(default=0, description="Number of direct subclasses")
     deprecated: bool = False
 
     model_config = ConfigDict(from_attributes=True)
@@ -105,7 +105,7 @@ class OWLClassTreeResponse(BaseModel):
     """Response for tree navigation endpoints."""
 
     nodes: list[OWLClassTreeNode]
-    total_classes: int = Field(0, description="Total number of classes in the ontology")
+    total_classes: int = Field(default=0, description="Total number of classes in the ontology")
 
 
 class EntitySearchResult(BaseModel):
