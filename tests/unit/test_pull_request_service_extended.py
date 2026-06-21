@@ -1512,6 +1512,63 @@ class TestCreateGitHubIntegration:
         assert result.repo_owner == "myorg"
 
     @pytest.mark.asyncio
+    async def test_create_integration_with_webhooks_creates_sync_config(
+        self, service: PullRequestService, mock_db: AsyncMock, mock_git_service: MagicMock
+    ) -> None:
+        """Creating an integration with webhooks enabled auto-creates a webhook RemoteSyncConfig."""
+        from ontokit.schemas.pull_request import GitHubIntegrationCreate
+
+        project = _make_project()
+        user = _make_user(OWNER_ID)
+
+        # DB: get project, no existing integration, no existing sync config
+        # (the third execute is the RemoteSyncConfig lookup inside
+        # _sync_remote_config_for_webhooks).
+        mock_db.execute.side_effect = [
+            _project_result(project),
+            _scalar_result(None),  # no existing integration
+            _scalar_result(None),  # no existing sync config
+        ]
+
+        def _populate_integration(obj: object, *_args: object, **_kwargs: object) -> None:
+            obj.id = uuid.uuid4()  # type: ignore[attr-defined]
+            obj.created_at = datetime.now(UTC)  # type: ignore[attr-defined]
+            obj.updated_at = None  # type: ignore[attr-defined]
+            obj.installation_id = None  # type: ignore[attr-defined]
+            obj.connected_by_user_id = user.id  # type: ignore[attr-defined]
+            obj.sync_enabled = True  # type: ignore[attr-defined]
+            obj.last_sync_at = None  # type: ignore[attr-defined]
+            obj.github_hook_id = None  # type: ignore[attr-defined]
+
+        mock_db.refresh.side_effect = _populate_integration
+
+        create_data = GitHubIntegrationCreate(
+            repo_owner="myorg",
+            repo_name="myrepo",
+            default_branch="main",
+            webhooks_enabled=True,
+            ontology_file_path="ontology.ttl",
+        )
+        await service.create_github_integration(PROJECT_ID, create_data, user)
+
+        # Both the integration and the sync config are added; find the sync config.
+        sync_configs = [
+            call.args[0]
+            for call in mock_db.add.call_args_list
+            if getattr(call.args[0], "frequency", None) == "webhook"
+        ]
+        assert len(sync_configs) == 1, "expected exactly one webhook RemoteSyncConfig to be added"
+        added_config = sync_configs[0]
+        mock_git_service.setup_remote.assert_called_once_with(
+            PROJECT_ID, "https://github.com/myorg/myrepo.git"
+        )
+        assert added_config.enabled is True
+        assert added_config.repo_owner == "myorg"
+        assert added_config.repo_name == "myrepo"
+        assert added_config.branch == "main"
+        assert added_config.file_path == "ontology.ttl"
+
+    @pytest.mark.asyncio
     async def test_create_integration_already_exists(
         self, service: PullRequestService, mock_db: AsyncMock
     ) -> None:

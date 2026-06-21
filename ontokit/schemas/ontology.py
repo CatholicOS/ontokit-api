@@ -57,7 +57,7 @@ class OntologyCreate(OntologyBase):
 class OntologyUpdate(BaseModel):
     """Schema for updating ontology metadata."""
 
-    title: str | None = Field(None, min_length=1, max_length=500)
+    title: str | None = Field(default=None, min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=5000)
     version_iri: str | None = Field(default=None, max_length=2048)
     labels: list[LocalizedString] | None = None
