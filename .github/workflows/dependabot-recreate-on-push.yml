@@ -1,11 +1,20 @@
-name: Rebase stale Dependabot PRs
+name: Recreate stale Dependabot PRs
 
 # Push trigger: catches the common case where dev advances under
 # already-open dependabot PRs.
 # Schedule trigger: catches the race where a fresh dependabot PR is
 # opened against a stale base SHA (e.g., dev got a merge during the
 # few-minute window dependabot took to open the PR). Self-heals
-# within 30 min, no manual `@dependabot rebase` required.
+# within 30 min, no manual intervention required.
+#
+# We use `@dependabot recreate` rather than `@dependabot rebase`:
+# rebase frequently no-ops with "The base commit for this pull request
+# has not changed" (Dependabot's cached view of the base lags behind
+# fast-moving branches), leaving the PR stuck BEHIND under the strict
+# "require branches up to date" ruleset on dev. recreate rebuilds the PR
+# from scratch against the current base, so it always picks up the new
+# base SHA, and Dependabot's own push re-triggers CI and re-arms
+# auto-merge.
 on:
   push:
     branches: [dev]
@@ -17,10 +26,10 @@ permissions:
   pull-requests: write
 
 jobs:
-  rebase:
+  recreate:
     runs-on: ubuntu-latest
     steps:
-      - name: Request rebase on stale dependabot PRs
+      - name: Request recreate on stale dependabot PRs
         env:
           # PAT, not GITHUB_TOKEN: comments by github-actions[bot] don't
           # trigger dependabot's @-command handler.
@@ -36,6 +45,6 @@ jobs:
               --jq '.[] | select(.mergeStateStatus == "BEHIND") | .number'
           )
           for pr in "${prs[@]}"; do
-            echo "Requesting rebase of PR #$pr"
-            gh pr comment "$pr" --repo "$REPO" --body "@dependabot rebase"
+            echo "Requesting recreate of PR #$pr"
+            gh pr comment "$pr" --repo "$REPO" --body "@dependabot recreate"
           done
