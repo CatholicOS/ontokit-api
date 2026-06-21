@@ -1559,7 +1559,9 @@ class TestCreateGitHubIntegration:
         ]
         assert len(sync_configs) == 1, "expected exactly one webhook RemoteSyncConfig to be added"
         added_config = sync_configs[0]
-        mock_git_service.setup_remote.assert_called_once()
+        mock_git_service.setup_remote.assert_called_once_with(
+            PROJECT_ID, "https://github.com/myorg/myrepo.git"
+        )
         assert added_config.enabled is True
         assert added_config.repo_owner == "myorg"
         assert added_config.repo_name == "myrepo"
