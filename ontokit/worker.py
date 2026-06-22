@@ -1042,8 +1042,10 @@ async def run_remote_check_task(
 
     project_uuid = UUID(project_id)
 
+    # Imported before the try so they stay bound in the except handler below.
+    from ontokit.models.remote_sync import RemoteSyncConfig, SyncEvent
+
     try:
-        from ontokit.models.remote_sync import RemoteSyncConfig, SyncEvent
         from ontokit.services.github_service import get_github_service
 
         # Get sync config

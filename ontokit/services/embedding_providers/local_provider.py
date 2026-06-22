@@ -30,7 +30,12 @@ class LocalEmbeddingProvider(EmbeddingProvider):
     def dimensions(self) -> int:
         if self._dims is None:
             model = _get_model(self._model_name)
-            self._dims = model.get_sentence_embedding_dimension()  # type: ignore[attr-defined]
+            dims = model.get_sentence_embedding_dimension()  # type: ignore[attr-defined]
+            if dims is None:
+                raise RuntimeError(
+                    f"Model '{self._model_name}' did not report an embedding dimension"
+                )
+            self._dims = int(dims)
         return self._dims
 
     @property

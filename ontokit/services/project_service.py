@@ -35,6 +35,7 @@ from ontokit.schemas.project import (
     TransferOwnership,
 )
 from ontokit.services.ontology_extractor import (
+    NormalizationReport,
     OntologyMetadataExtractor,
     OntologyMetadataUpdater,
     OntologyParseError,
@@ -125,6 +126,7 @@ class ProjectService:
         # Skip canonical bnode IDs on import for speed - can be applied later via
         # the normalization feature if desired
         normalization_report_json: str | None = None
+        normalization_report: NormalizationReport | None = None
         try:
             normalized_content, normalization_report = extractor.normalize_to_turtle(
                 file_content, filename, use_canonical=False
@@ -208,12 +210,12 @@ class ProjectService:
             logger.warning(f"Failed to initialize git repository for project {db_project.id}: {e}")
 
         # Record normalization run for history tracking
-        if normalization_report_json is not None:
+        if normalization_report is not None:
             run = NormalizationRun(
                 project_id=db_project.id,
                 triggered_by=owner.id,
                 trigger_type="import",
-                report_json=normalization_report_json,
+                report_json=json.dumps(normalization_report.to_dict()),
                 original_format=normalization_report.original_format,
                 original_size_bytes=normalization_report.original_size_bytes,
                 normalized_size_bytes=normalization_report.normalized_size_bytes,
@@ -290,6 +292,7 @@ class ProjectService:
 
         # Normalize to Turtle
         normalization_report_json: str | None = None
+        normalization_report: NormalizationReport | None = None
         try:
             normalized_content, normalization_report = extractor.normalize_to_turtle(
                 file_content, filename, use_canonical=False
@@ -414,12 +417,12 @@ class ProjectService:
                 )
 
         # Record normalization run for history tracking
-        if normalization_report_json is not None:
+        if normalization_report is not None:
             run = NormalizationRun(
                 project_id=db_project.id,
                 triggered_by=owner.id,
                 trigger_type="import",
-                report_json=normalization_report_json,
+                report_json=json.dumps(normalization_report.to_dict()),
                 original_format=normalization_report.original_format,
                 original_size_bytes=normalization_report.original_size_bytes,
                 normalized_size_bytes=normalization_report.normalized_size_bytes,
@@ -457,11 +460,17 @@ class ProjectService:
         opts = [selectinload(Project.members), selectinload(Project.github_integration)]
         query = select(Project).options(*opts)
 
+        # Subquery of project IDs the user is a member of. For anonymous users
+        # the predicate matches nothing and is never used in the branches below,
+        # but computing it unconditionally keeps it always bound.
+        subquery = select(ProjectMember.project_id).where(
+            ProjectMember.user_id == (user.id if user is not None else None)
+        )
+
         # Build access-control clause (all projects the user can see)
         if user is None:
             access_clause = Project.is_public == True  # noqa: E712
         else:
-            subquery = select(ProjectMember.project_id).where(ProjectMember.user_id == user.id)
             access_clause = or_(
                 Project.is_public == True,  # noqa: E712
                 Project.id.in_(subquery),

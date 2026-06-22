@@ -704,9 +704,9 @@ class BareOntologyRepository:
             # Merge conflicts
             conflict_paths = list(
                 {
-                    entry[0].path if entry[0] else entry[1].path if entry[1] else entry[2].path
+                    str(index_entry.path)
                     for entry in merge_index.conflicts
-                    if any(entry)
+                    if (index_entry := entry[0] or entry[1] or entry[2]) is not None
                 }
             )
             return MergeResult(
