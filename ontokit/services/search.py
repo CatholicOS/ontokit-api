@@ -218,7 +218,7 @@ class SearchService:
         }
         try:
             parsed = parseQuery(query_text)
-            query_type = _SPARQL_TYPE_MAP.get(parsed[1].name, "SELECT")
+            query_type = _SPARQL_TYPE_MAP.get(getattr(parsed[1], "name", ""), "SELECT")
         except Exception as exc:
             logger.warning("SPARQL query parse failed: %s", exc)
             raise ValueError(f"Invalid SPARQL query: {exc}") from exc

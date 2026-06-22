@@ -12,6 +12,7 @@ from fastapi import HTTPException
 
 from ontokit.core.auth import CurrentUser
 from ontokit.schemas.project import MemberCreate, ProjectCreate, ProjectUpdate, TransferOwnership
+from ontokit.services.ontology_extractor import OntologyMetadataExtractor, OntologyParseError
 from ontokit.services.project_service import ProjectService, get_project_service
 
 PROJECT_ID = uuid.UUID("12345678-1234-5678-1234-567812345678")
@@ -987,6 +988,37 @@ class TestCreateFromImport:
         mock_db.commit.assert_awaited()
 
     @pytest.mark.asyncio
+    async def test_import_normalization_failure_skips_run(
+        self, service: ProjectService, mock_db: AsyncMock
+    ) -> None:
+        """If normalization fails after metadata extraction, import still
+        succeeds and no NormalizationRun is recorded."""
+        owner = _make_user()
+        storage = AsyncMock()
+        storage.upload_file = AsyncMock(return_value="projects/xyz/ontology.ttl")
+        turtle_content = (
+            b"@prefix owl: <http://www.w3.org/2002/07/owl#> .\n<http://ex.org/ont> a owl:Ontology ."
+        )
+        mock_db.refresh.side_effect = _make_simulate_refresh(owner.id, extended=True)
+
+        with patch.object(
+            OntologyMetadataExtractor,
+            "normalize_to_turtle",
+            side_effect=OntologyParseError("normalization boom"),
+        ):
+            result = await service.create_from_import(
+                file_content=turtle_content,
+                filename="test.ttl",
+                is_public=True,
+                owner=owner,
+                storage=storage,
+            )
+
+        assert result.name is not None
+        added = [type(c.args[0]).__name__ for c in mock_db.add.call_args_list]
+        assert "NormalizationRun" not in added
+
+    @pytest.mark.asyncio
     async def test_import_unsupported_format(
         self,
         service: ProjectService,
@@ -1116,6 +1148,43 @@ class TestCreateFromGithub:
         # 3 adds: project, owner member, github integration
         # 4 adds: project, owner member, github integration, normalization run
         assert mock_db.add.call_count == 4
+
+    @pytest.mark.asyncio
+    async def test_github_import_normalization_failure_skips_run(
+        self, service: ProjectService, mock_db: AsyncMock, mock_git_service: MagicMock
+    ) -> None:
+        """If normalization fails, GitHub import still succeeds without a
+        NormalizationRun (project, owner member, github integration only)."""
+        owner = _make_user()
+        storage = AsyncMock()
+        storage.upload_file = AsyncMock(return_value="projects/xyz/ontology.ttl")
+        mock_git_service.clone_from_github = MagicMock()
+        mock_git_service.commit_changes = MagicMock(return_value=MagicMock(hash="def456"))
+        turtle_content = (
+            b"@prefix owl: <http://www.w3.org/2002/07/owl#> .\n<http://ex.org/ont> a owl:Ontology ."
+        )
+        mock_db.refresh.side_effect = _make_simulate_refresh(owner.id, extended=True)
+
+        with patch.object(
+            OntologyMetadataExtractor,
+            "normalize_to_turtle",
+            side_effect=OntologyParseError("normalization boom"),
+        ):
+            result = await service.create_from_github(
+                file_content=turtle_content,
+                filename="ontology.ttl",
+                repo_owner="testorg",
+                repo_name="testrepo",
+                ontology_file_path="src/ontology.ttl",
+                default_branch="main",
+                is_public=True,
+                owner=owner,
+                storage=storage,
+                github_token="test-token",
+            )
+
+        assert result.name is not None
+        assert mock_db.add.call_count == 3
 
     @pytest.mark.asyncio
     async def test_github_import_clone_failure_falls_back(
