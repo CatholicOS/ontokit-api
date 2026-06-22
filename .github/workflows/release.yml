@@ -19,9 +19,9 @@ jobs:
       - run: uv run ruff format --check ontokit/
       - run: uv run mypy ontokit/
 
-  # Advisory only: pyright complements mypy but does NOT gate merges yet.
-  # continue-on-error surfaces its diagnostics in the logs without failing
-  # CI. Re-evaluate making it gating after a trial period (see issue #134).
+  # Soft gate: this job goes red on any pyright error (clear signal), but it is
+  # deliberately NOT in the dev ruleset's required checks, so it never hard-blocks
+  # merges. mypy remains the authoritative gate. See issue #134.
   pyright:
     runs-on: ubuntu-latest
     permissions:
@@ -31,7 +31,6 @@ jobs:
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
       - run: uv sync --group dev
       - run: uv run pyright ontokit/
-        continue-on-error: true
 
   test:
     runs-on: ubuntu-latest

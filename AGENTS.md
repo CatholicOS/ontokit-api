@@ -34,11 +34,13 @@ uv run pyright ontokit/   # advisory — non-gating CI job + IDE
 
 **mypy is authoritative**: strict mode with the `pydantic.mypy` plugin, run in
 pre-commit and the `lint` CI job — it is the only type checker that gates merges.
-**pyright is advisory**: a `continue-on-error` CI job (issue #134) and the default
-IDE checker. It catches issues mypy misses (possibly-unbound vars, narrowing) but
-lacks mypy's plugin coverage (Pydantic field typing), so when they disagree, mypy
-wins until pyright is promoted to gating. Pyright only recognizes keyword
-defaults — prefer `Field(default=None)` over `Field(None)` in Pydantic schemas.
+**pyright is advisory (soft-gated)**: a CI job that goes red on any error but is
+**not** in the branch ruleset's required checks, so it surfaces problems without
+hard-blocking merges (issue #134); it is also the default IDE checker. It catches
+issues mypy misses (possibly-unbound vars, narrowing) but lacks mypy's plugin
+coverage (Pydantic field typing), so when they disagree, mypy wins. Pyright only
+recognizes keyword defaults — prefer `Field(default=None)` over `Field(None)` in
+Pydantic schemas. Keep the `ontokit/` pyright run clean (0 errors).
 
 ### Security Scanning
 
@@ -166,7 +168,8 @@ From pyproject.toml:
 - Line length: 100 characters
 - Ruff rules: E, W, F, I, B, C4, UP, ARG, SIM
 - MyPy: Strict mode enabled, Python 3.11 target — authoritative, gates CI
-- Pyright: standard mode, advisory only (non-gating CI + IDE); see Type Checking
+- Pyright: standard mode, advisory soft-gate (CI job red on error, non-blocking);
+  keep `ontokit/` at 0 errors. See Type Checking.
 
 ## Scripts
 
