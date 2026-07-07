@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
+from fastapi.security import HTTPAuthorizationCredentials
 
 from ontokit.core.auth import (
     ANONYMOUS_USER,
@@ -12,7 +13,6 @@ from ontokit.core.auth import (
     get_current_user_optional,
     get_current_user_with_token,
 )
-
 
 # ---------------------------------------------------------------------------
 # ANONYMOUS_USER constant
@@ -71,6 +71,20 @@ class TestAuthModeDisabled:
         """In disabled mode, get_current_user_with_token returns (ANONYMOUS_USER, 'anonymous')."""
         mock_settings.auth_mode = "disabled"
         user, token = await get_current_user_with_token(credentials=None)
+        assert user is ANONYMOUS_USER
+        assert token == "anonymous"
+
+    @pytest.mark.asyncio
+    @patch("ontokit.core.auth.settings")
+    async def test_disabled_ignores_valid_credentials(self, mock_settings) -> None:  # noqa: ANN001
+        """In disabled mode, even a present/valid Bearer token is ignored — everyone is
+        anonymous viewer, no privilege differentiation (the disabled early-return fires
+        before any token validation). Documents the /ce:review LOW finding for PR-2."""
+        mock_settings.auth_mode = "disabled"
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="a.valid.jwt")
+        assert await get_current_user(credentials=creds) is ANONYMOUS_USER
+        assert await get_current_user_optional(credentials=creds) is ANONYMOUS_USER
+        user, token = await get_current_user_with_token(credentials=creds)
         assert user is ANONYMOUS_USER
         assert token == "anonymous"
 
