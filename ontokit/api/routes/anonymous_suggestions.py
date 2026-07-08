@@ -163,14 +163,9 @@ async def anonymous_beacon_save(
     Authenticated via 'token' query parameter (same pattern as authenticated beacon).
     """
     _require_anonymous_mode()
-    verified_session_id = verify_anonymous_token(token)
-    if verified_session_id is None:
-        from fastapi import HTTPException
-
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired anonymous token",
-        )
-    # Delegate to the existing beacon_save (session lookup is by session_id, no user check)
-    await service.beacon_save(project_id, data, data.session_id)
+    verified_session_id = _verify_anon_token(token)
+    # beacon_save_anonymous binds the verified token to the payload session and
+    # re-checks is_anonymous (the lineage version passed data.session_id where a
+    # BEACON token was expected — the endpoint always 401'd; fixed in PR-7).
+    await service.beacon_save_anonymous(project_id, data, verified_session_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

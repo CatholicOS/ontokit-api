@@ -23,14 +23,14 @@ from sqlalchemy.orm import selectinload
 
 from ontokit.core.auth import CurrentUser
 from ontokit.core.beacon_token import create_beacon_token, verify_beacon_token
+from ontokit.git import GitRepositoryService, get_git_service
+from ontokit.models.project import Project
+from ontokit.models.suggestion_session import SuggestionSession, SuggestionSessionStatus
 from ontokit.schemas.anonymous_suggestion import (
     AnonymousSessionCreateResponse,
     AnonymousSubmitRequest,
     AnonymousSubmitResponse,
 )
-from ontokit.git import GitRepositoryService, get_git_service
-from ontokit.models.project import Project
-from ontokit.models.suggestion_session import SuggestionSession, SuggestionSessionStatus
 from ontokit.schemas.pull_request import PRCreate
 from ontokit.schemas.suggestion import (
     SuggestionBeaconRequest,
@@ -814,6 +814,42 @@ class SuggestionService:
         )
         await self._verify_project_access(project_id, session_user)
 
+        await self._beacon_flush(project_id, session, data)
+
+    async def beacon_save_anonymous(
+        self, project_id: UUID, data: SuggestionBeaconRequest, verified_session_id: str
+    ) -> None:
+        """Handle a beacon save for an ANONYMOUS session.
+
+        The caller (route) has already verified the X-Anonymous-Token; this
+        method binds it to the payload's session and re-checks the session is
+        actually anonymous (an anonymous token must never flush an
+        authenticated user's session). No user-identity access re-check: the
+        session's project is public by construction (create-time gate).
+        """
+        if verified_session_id != data.session_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Token does not match session",
+            )
+
+        session = await self._get_session(project_id, data.session_id)
+
+        if not session.is_anonymous:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Session is not an anonymous session",
+            )
+
+        if session.status != SuggestionSessionStatus.ACTIVE.value:
+            return  # Silently ignore saves to non-active sessions
+
+        await self._beacon_flush(project_id, session, data)
+
+    async def _beacon_flush(
+        self, project_id: UUID, session: SuggestionSession, data: SuggestionBeaconRequest
+    ) -> None:
+        """Commit a beacon payload to the session branch (fire-and-forget)."""
         project = await self._get_project(project_id)
         filename = self._get_git_ontology_path(project)
 
@@ -850,8 +886,14 @@ class SuggestionService:
         """
         from sqlalchemy import func as sa_func
 
-        # Verify project exists
-        await self._get_project(project_id)
+        # Verify project exists AND is public — anonymous users must never be
+        # able to create suggestion branches/PRs against a private project.
+        project = await self._get_project(project_id)
+        if not project.is_public:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Anonymous suggestions are only available on public projects",
+            )
 
         # Rate limit check: max 5 anonymous sessions per IP per hour
         cutoff = datetime.now(UTC) - timedelta(hours=1)
