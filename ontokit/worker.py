@@ -631,9 +631,15 @@ async def auto_submit_stale_suggestions(ctx: dict[str, Any]) -> dict[str, Any]:
 
         service = SuggestionService(db)
         count = await service.auto_submit_stale_sessions()
+        # Anonymous sessions get a dedicated reaper (discard + branch delete at
+        # token TTL) — the authed sweep excludes them by design (PR-7).
+        reaped = await service.reap_stale_anonymous_sessions()
 
-        logger.info(f"Auto-submit complete: {count} stale suggestion sessions submitted")
-        return {"auto_submitted": count}
+        logger.info(
+            f"Auto-submit complete: {count} stale suggestion sessions submitted, "
+            f"{reaped} stale anonymous sessions reaped"
+        )
+        return {"auto_submitted": count, "anonymous_reaped": reaped}
 
     except Exception as e:
         logger.exception(f"Auto-submit stale suggestions failed: {e}")

@@ -202,3 +202,77 @@ async def test_beacon_save_anonymous_rejects_authenticated_session() -> None:
     with pytest.raises(HTTPException) as exc:
         await service.beacon_save_anonymous(uuid4(), data, "s_abc")
     assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_reap_deletes_branch_and_discards() -> None:
+    """The anonymous reaper must delete the git branch (orphaned-branch leak fix)."""
+    from ontokit.services.suggestion_service import SuggestionService
+
+    service = SuggestionService.__new__(SuggestionService)
+    stale = MagicMock()
+    stale.id = uuid4()
+    stale.project_id = uuid4()
+    stale.session_id = "s_stale"
+    stale.branch = "suggest/anonymous/s_stale"
+    stale.changes_count = 0
+
+    select_result = MagicMock()
+    select_result.scalars.return_value.all.return_value = [stale]
+    claim_result = MagicMock()
+    claim_result.rowcount = 1
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[select_result, claim_result])
+    db.commit = AsyncMock()
+    service.db = db
+    service.git_service = MagicMock()
+
+    count = await service.reap_stale_anonymous_sessions()
+
+    assert count == 1
+    service.git_service.delete_branch.assert_called_once_with(
+        stale.project_id, stale.branch, force=True
+    )
+
+
+@pytest.mark.asyncio
+async def test_reap_skips_sessions_claimed_by_another_worker() -> None:
+    from ontokit.services.suggestion_service import SuggestionService
+
+    service = SuggestionService.__new__(SuggestionService)
+    stale = MagicMock()
+    stale.id = uuid4()
+
+    select_result = MagicMock()
+    select_result.scalars.return_value.all.return_value = [stale]
+    claim_result = MagicMock()
+    claim_result.rowcount = 0  # another worker won the claim
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[select_result, claim_result])
+    db.commit = AsyncMock()
+    service.db = db
+    service.git_service = MagicMock()
+
+    count = await service.reap_stale_anonymous_sessions()
+
+    assert count == 0
+    service.git_service.delete_branch.assert_not_called()
+
+
+def test_openapi_does_not_disclose_honeypot_semantics() -> None:
+    """The honeypot only works if the public schema doesn't explain it."""
+    import json
+
+    from ontokit.main import app
+
+    schema = app.openapi()
+    request_schema = schema["components"]["schemas"]["AnonymousSubmitRequest"]
+    blob = json.dumps(request_schema) + json.dumps(
+        {p: ops for p, ops in schema["paths"].items() if "anonymous" in p}
+    )
+    for needle in ("honeypot", "Honeypot", "bots", "bot detection", "fake success"):
+        assert needle not in blob, f"OpenAPI leaks honeypot semantics via {needle!r}"
+    # the field itself must still be present under its innocuous alias
+    assert "website" in request_schema["properties"]

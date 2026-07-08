@@ -18,11 +18,7 @@ class AnonymousSessionCreateResponse(BaseModel):
 
 
 class AnonymousSubmitRequest(BaseModel):
-    """Request body for submitting an anonymous suggestion session.
-
-    Includes optional credit fields and a honeypot field.
-    Bots filling the honeypot (aliased as 'website') trigger a silent fake success.
-    """
+    """Request body for submitting an anonymous suggestion session."""
 
     summary: str | None = Field(default=None, description="Optional summary of the changes")
     submitter_name: str | None = Field(
@@ -31,10 +27,13 @@ class AnonymousSubmitRequest(BaseModel):
     submitter_email: str | None = Field(
         default=None, description="Optional email to associate with the suggestion"
     )
+    # Spam-control field. Deliberately documented as an ordinary optional
+    # website URL: the real semantics (filled -> silent fake success) must not
+    # appear in the public OpenAPI schema, which bots can read.
     honeypot: str | None = Field(
         default=None,
         alias="website",
-        description="Honeypot field — must be empty; bots fill this automatically",
+        description="Optional website URL",
     )
 
     model_config = {"populate_by_name": True}

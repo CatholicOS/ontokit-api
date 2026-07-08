@@ -115,7 +115,6 @@ async def submit_anonymous_session(
     """Submit an anonymous suggestion session as a pull request.
 
     Authenticated via X-Anonymous-Token header.
-    Honeypot field ('website') triggers silent fake success for bot detection.
     """
     _require_anonymous_mode()
     verified_session_id = _verify_anon_token(x_anonymous_token)

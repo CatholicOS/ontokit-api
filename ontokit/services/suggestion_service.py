@@ -895,11 +895,12 @@ class SuggestionService:
                 detail="Anonymous suggestions are only available on public projects",
             )
 
-        # Rate limit check: max 5 anonymous sessions per IP per hour
+        # Rate limit check: max 5 anonymous sessions per IP per hour — GLOBAL
+        # across projects on purpose. Scoping by project would let one IP mint
+        # 5 sessions (and git branches) on every public project per hour.
         cutoff = datetime.now(UTC) - timedelta(hours=1)
         rate_result = await self.db.execute(
             select(sa_func.count(SuggestionSession.id)).where(
-                SuggestionSession.project_id == project_id,
                 SuggestionSession.is_anonymous.is_(True),
                 SuggestionSession.client_ip == client_ip,
                 SuggestionSession.created_at > cutoff,
@@ -1143,6 +1144,11 @@ class SuggestionService:
                 SuggestionSession.status == SuggestionSessionStatus.ACTIVE.value,
                 SuggestionSession.changes_count > 0,
                 SuggestionSession.last_activity < cutoff,
+                # Anonymous sessions are handled by reap_stale_anonymous_sessions:
+                # their pseudo-user is never a project member, so the access
+                # re-check below would always discard them WITHOUT deleting the
+                # branch (orphaned-branch leak).
+                SuggestionSession.is_anonymous.is_(False),
             )
         )
         stale_sessions = result.scalars().all()
@@ -1159,6 +1165,7 @@ class SuggestionService:
                     SuggestionSession.status == SuggestionSessionStatus.ACTIVE.value,
                     SuggestionSession.changes_count > 0,
                     SuggestionSession.last_activity < cutoff,
+                    SuggestionSession.is_anonymous.is_(False),
                 )
                 .values(status=SuggestionSessionStatus.AUTO_SUBMITTED.value)
             )
@@ -1210,6 +1217,64 @@ class SuggestionService:
                     logger.error(
                         f"Failed to revert session {session.session_id} to ACTIVE: {revert_err}"
                     )
+
+        return count
+
+    async def reap_stale_anonymous_sessions(self, ttl_hours: int = 24) -> int:
+        """Discard stale ANONYMOUS sessions and delete their git branches.
+
+        Anonymous tokens expire after 24h, so past the TTL the session is
+        unreachable by its creator anyway. Without this reaper every abandoned
+        anonymous session leaves an orphaned git branch forever (the authed
+        sweep can't handle them: the anonymous pseudo-user is never a project
+        member). Includes sessions with changes_count == 0 — those were never
+        matched by any sweep at all.
+
+        Returns the number of sessions reaped.
+        """
+        cutoff = datetime.now(UTC) - timedelta(hours=ttl_hours)
+
+        result = await self.db.execute(
+            select(SuggestionSession).where(
+                SuggestionSession.status == SuggestionSessionStatus.ACTIVE.value,
+                SuggestionSession.is_anonymous.is_(True),
+                SuggestionSession.last_activity < cutoff,
+            )
+        )
+        stale = result.scalars().all()
+
+        count = 0
+        for session in stale:
+            # Atomic claim (same pattern as auto_submit_stale_sessions)
+            claim_result = await self.db.execute(
+                update(SuggestionSession)
+                .where(
+                    SuggestionSession.id == session.id,
+                    SuggestionSession.status == SuggestionSessionStatus.ACTIVE.value,
+                    SuggestionSession.is_anonymous.is_(True),
+                    SuggestionSession.last_activity < cutoff,
+                )
+                .values(status=SuggestionSessionStatus.DISCARDED.value)
+            )
+            if claim_result.rowcount != 1:  # type: ignore[attr-defined]
+                continue
+            await self.db.commit()
+
+            try:
+                self.git_service.delete_branch(session.project_id, session.branch, force=True)
+            except Exception as e:
+                # Branch may already be gone; log and keep the discard.
+                logger.warning(
+                    "Reaped anonymous session %s but branch delete failed: %s",
+                    session.session_id,
+                    e,
+                )
+            count += 1
+            logger.info(
+                "Reaped stale anonymous session %s (changes_count=%s)",
+                session.session_id,
+                session.changes_count,
+            )
 
         return count
 
