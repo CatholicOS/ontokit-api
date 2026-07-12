@@ -22,7 +22,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "fastapi>=0.138.1",
+    "fastapi>=0.139.0",
     "uvicorn[standard]>=0.49.0",
     "pydantic>=2.13.4,<2.14",
     "pydantic-settings>=2.14.2,<2.15",
@@ -41,10 +41,10 @@ dependencies = [
     "pyjwt>=2.13.0",
     "pygithub>=2.9.1",
     "minio>=7.2.0",
-    "websockets>=14.0",
+    "websockets>=16.1",
     "slowapi>=0.1.10",
     "sentence-transformers>=5.6.0",
-    "pgvector>=0.3.0",
+    "pgvector>=0.5.0",
     "numpy>=2.4.6",
 ]
 
@@ -54,8 +54,8 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
     "httpx>=0.28.0",
-    "ruff>=0.15.20",
-    "mypy>=2.1.0",
+    "ruff>=0.15.21",
+    "mypy>=2.2.0",
     "pre-commit>=4.6.0",
     "pyright>=1.1.411",
 ]
