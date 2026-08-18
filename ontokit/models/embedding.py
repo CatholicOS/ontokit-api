@@ -21,11 +21,16 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ontokit.core.database import Base
 
-# Import Vector conditionally to avoid hard failure if pgvector not installed
+# Import Vector conditionally to avoid hard failure if pgvector not installed.
+# Typed as ``Any`` so the ``Vector is None`` fallback checks downstream stay valid
+# for type checkers now that pgvector ships type information.
+Vector: Any
 try:
-    from pgvector.sqlalchemy import Vector  # type: ignore
-except ImportError:
-    Vector = None  # noqa: N806
+    import pgvector.sqlalchemy as _pgvector_sqlalchemy
+except ImportError:  # pragma: no cover - exercised only without pgvector installed
+    Vector = None
+else:
+    Vector = _pgvector_sqlalchemy.Vector
 
 
 class ProjectEmbeddingConfig(Base):
