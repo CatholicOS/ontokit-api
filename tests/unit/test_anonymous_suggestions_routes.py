@@ -34,6 +34,13 @@ SAVE_BODY = {
 SUBMIT_BODY = {"summary": "adds Foo"}
 
 
+@pytest.fixture(autouse=True)
+def _secure_test_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep route tests independent of the intentionally insecure config default."""
+    test_settings = type("Settings", (), {"secret_key": "test-secret-key-long-enough"})()
+    monkeypatch.setattr("ontokit.core.anonymous_token.settings", test_settings)
+
+
 # ── AUTH_MODE gate ────────────────────────────────────────────────────────────
 
 

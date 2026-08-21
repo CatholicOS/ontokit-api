@@ -21,6 +21,14 @@ from ontokit.core.anonymous_token import create_anonymous_token, verify_anonymou
 from ontokit.core.beacon_token import create_beacon_token, verify_beacon_token
 
 
+@pytest.fixture(autouse=True)
+def _secure_test_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise token behavior with an explicit non-production test key."""
+    test_settings = type("Settings", (), {"secret_key": "test-secret-key-long-enough"})()
+    monkeypatch.setattr("ontokit.core.anonymous_token.settings", test_settings)
+    monkeypatch.setattr("ontokit.core.beacon_token.settings", test_settings)
+
+
 def test_round_trip() -> None:
     token = create_anonymous_token("s_abc123")
     assert verify_anonymous_token(token) == "s_abc123"
