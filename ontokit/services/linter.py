@@ -12,6 +12,7 @@ from rdflib import Literal as RDFLiteral
 from rdflib.namespace import OWL, RDF, RDFS, SKOS, XSD
 
 from ontokit.models.lint import LintIssueType
+from ontokit.services.rdf_utils import is_deprecated
 
 DC = Namespace("http://purl.org/dc/elements/1.1/")
 DCTERMS = Namespace("http://purl.org/dc/terms/")
@@ -67,11 +68,11 @@ LINT_RULES: list[LintRuleInfo] = [
         scope=["class"],
     ),
     LintRuleInfo(
-        rule_id="undefined-parent",
-        name="Undefined Parent",
-        description="Class references a parent that is not defined in the ontology",
+        rule_id="dangling-ref",
+        name="Dangling Reference",
+        description="Reference to a URI not defined in the ontology (in subClassOf, rdfs:domain, or rdfs:range)",
         severity=LintIssueType.ERROR.value,
-        scope=["class"],
+        scope=["class", "property"],
     ),
     LintRuleInfo(
         rule_id="circular-hierarchy",
@@ -90,7 +91,7 @@ LINT_RULES: list[LintRuleInfo] = [
     LintRuleInfo(
         rule_id="duplicate-label",
         name="Duplicate Label",
-        description="Multiple resources share the same label, which may cause confusion",
+        description="Multiple resources of the same entity type share the same label (case-insensitive, per language)",
         severity=LintIssueType.WARNING.value,
         scope=_ALL,
     ),
@@ -181,18 +182,62 @@ LINT_RULES: list[LintRuleInfo] = [
         severity=LintIssueType.WARNING.value,
         scope=_ALL,
     ),
+    LintRuleInfo(
+        rule_id="unused-property",
+        name="Unused Property",
+        description="Property is declared but never used as a predicate in any triple",
+        severity=LintIssueType.WARNING.value,
+        scope=["property"],
+    ),
+    LintRuleInfo(
+        rule_id="orphan-individual",
+        name="Orphan Individual",
+        description="Individual's rdf:type target is not declared as owl:Class in this ontology",
+        severity=LintIssueType.WARNING.value,
+        scope=["individual"],
+    ),
+    LintRuleInfo(
+        rule_id="empty-domain",
+        name="Empty Domain",
+        description="ObjectProperty or DatatypeProperty has no rdfs:domain",
+        severity=LintIssueType.INFO.value,
+        scope=["property"],
+    ),
+    LintRuleInfo(
+        rule_id="empty-range",
+        name="Empty Range",
+        description="ObjectProperty or DatatypeProperty has no rdfs:range",
+        severity=LintIssueType.INFO.value,
+        scope=["property"],
+    ),
+    LintRuleInfo(
+        rule_id="deprecated-parent",
+        name="Deprecated Parent",
+        description="Class subclasses a class marked owl:deprecated",
+        severity=LintIssueType.WARNING.value,
+        scope=["class"],
+    ),
+    LintRuleInfo(
+        rule_id="multi-root",
+        name="Multiple Root Classes",
+        description="Ontology has more than 5 root classes (classes with no parent except owl:Thing)",
+        severity=LintIssueType.INFO.value,
+        scope=[],
+    ),
 ]
 
 # Map rule IDs to their info
 LINT_RULES_MAP: dict[str, LintRuleInfo] = {rule.rule_id: rule for rule in LINT_RULES}
 
 # Progressive lint levels — each level cumulatively includes the previous
-_LEVEL_1_RULES: set[str] = {"undefined-parent", "circular-hierarchy", "undefined-prefix"}
+_LEVEL_1_RULES: set[str] = {"dangling-ref", "circular-hierarchy", "undefined-prefix"}
 _LEVEL_2_RULES: set[str] = _LEVEL_1_RULES | {
     "orphan-class",
     "duplicate-triple",
     "disjoint-violation",
     "missing-type-declaration",
+    "orphan-individual",
+    "deprecated-parent",
 }
 _LEVEL_3_RULES: set[str] = _LEVEL_2_RULES | {
     "missing-label",
@@ -205,6 +250,10 @@ _LEVEL_4_RULES: set[str] = _LEVEL_3_RULES | {
     "missing-comment",
     "label-per-language",
     "redundant-regional-label",
+    "unused-property",
+    "empty-domain",
+    "empty-range",
+    "multi-root",
 }
 _LEVEL_5_RULES: set[str] = {r.rule_id for r in LINT_RULES}
 
@@ -230,12 +279,15 @@ class LintLevelDefinition(NamedTuple):
 LINT_LEVEL_DEFINITIONS: dict[int, LintLevelDefinition] = {
     1: LintLevelDefinition(
         "Critical",
-        "Undefined parents, circular hierarchies, undefined prefixes",
+        "Dangling references, circular hierarchies, undefined prefixes",
         LINT_LEVELS[1],
     ),
     2: LintLevelDefinition(
         "Consistency",
-        "Orphan classes, duplicate triples, and disjointness violations",
+        (
+            "Orphan classes, duplicate triples, disjointness violations, "
+            "orphan individuals, deprecated parent classes"
+        ),
         LINT_LEVELS[2],
     ),
     3: LintLevelDefinition(
@@ -245,7 +297,10 @@ LINT_LEVEL_DEFINITIONS: dict[int, LintLevelDefinition] = {
     ),
     4: LintLevelDefinition(
         "Quality",
-        "Comments, per-language label checks, and redundant regional variants",
+        (
+            "Comments, per-language label checks, redundant regional variants, "
+            "unused properties, empty domain/range, multi-root warnings"
+        ),
         LINT_LEVELS[4],
     ),
     5: LintLevelDefinition(
@@ -392,45 +447,73 @@ class OntologyLinter:
 
         return issues
 
-    async def _check_undefined_parent(self, graph: Graph) -> list[LintResult]:
-        """Find classes that reference undefined parent classes."""
-        issues = []
+    async def _check_dangling_ref(self, graph: Graph) -> list[LintResult]:
+        """Find references to URIs that aren't declared in this ontology.
 
-        # Build set of all defined classes
-        defined_classes = {
-            str(c) for c in graph.subjects(RDF.type, OWL.Class) if isinstance(c, URIRef)
+        Scans rdfs:subClassOf, rdfs:domain, and rdfs:range. References into
+        well-known vocabularies (rdf/rdfs/owl/xsd/skos/dc/dcterms) and into
+        namespaces brought in via owl:imports are not flagged.
+        """
+        issues: list[LintResult] = []
+
+        # A URI is "known" if it appears as a subject of any triple in this graph.
+        known: set[URIRef] = {s for s in graph.subjects() if isinstance(s, URIRef)} | {OWL.Thing}
+
+        well_known_ns = {
+            str(RDF),
+            str(RDFS),
+            str(OWL),
+            str(XSD),
+            str(SKOS),
+            str(DC),
+            str(DCTERMS),
         }
-        # Add owl:Thing as it's always implicitly defined
-        defined_classes.add(str(OWL.Thing))
+        imported_ns: set[str] = set()
+        for _ontology, _pred, imported in graph.triples((None, OWL.imports, None)):
+            if isinstance(imported, URIRef):
+                imp_str = str(imported)
+                # Both slash and hash forms are valid namespace shapes; if the
+                # owl:imports IRI already ends in one, keep it as-is, otherwise
+                # add both variants so terms can be matched either way.
+                if imp_str.endswith(("/", "#")):
+                    imported_ns.add(imp_str)
+                else:
+                    imported_ns.add(imp_str + "/")
+                    imported_ns.add(imp_str + "#")
+        external_ns = well_known_ns | imported_ns
 
-        for class_uri in graph.subjects(RDF.type, OWL.Class):
-            if not isinstance(class_uri, URIRef):
-                continue
+        # (subject_iri, predicate, target) keyed reporting to deduplicate
+        # when the same triple would be reported by multiple iterations.
+        reported: set[tuple[str, str, str]] = set()
 
-            # Check each parent
-            for parent_uri in graph.objects(class_uri, RDFS.subClassOf):
-                if not isinstance(parent_uri, URIRef):
+        for predicate in (RDFS.subClassOf, RDFS.domain, RDFS.range):
+            for subj, _p, obj in graph.triples((None, predicate, None)):
+                if not isinstance(obj, URIRef) or not isinstance(subj, URIRef):
                     continue
-
-                parent_str = str(parent_uri)
-                if parent_str not in defined_classes:
-                    label = self._get_label(graph, class_uri)
-                    issues.append(
-                        LintResult(
-                            issue_type=LintIssueType.ERROR.value,
-                            rule_id="undefined-parent",
-                            message="References undefined parent class",
-                            subject_iri=str(class_uri),
-                            subject_type="class",
-                            details={
-                                "local_name": self._get_local_name(class_uri),
-                                "label": label,
-                                "undefined_parent": parent_str,
-                                "undefined_parent_local": self._get_local_name(parent_uri),
-                            },
-                        )
+                if obj in known:
+                    continue
+                obj_str = str(obj)
+                if any(obj_str.startswith(ns) for ns in external_ns):
+                    continue
+                key = (str(subj), str(predicate), obj_str)
+                if key in reported:
+                    continue
+                reported.add(key)
+                issues.append(
+                    LintResult(
+                        issue_type=LintIssueType.ERROR.value,
+                        rule_id="dangling-ref",
+                        message=f"References undeclared entity {obj}",
+                        subject_iri=str(subj),
+                        subject_type=self._determine_entity_type(graph, subj),
+                        details={
+                            "local_name": self._get_local_name(subj),
+                            "predicate": str(predicate),
+                            "dangling_target": obj_str,
+                            "dangling_target_local": self._get_local_name(obj),
+                        },
                     )
-
+                )
         return issues
 
     async def _check_circular_hierarchy(self, graph: Graph) -> list[LintResult]:
@@ -522,47 +605,65 @@ class OntologyLinter:
         return issues
 
     async def _check_duplicate_label(self, graph: Graph) -> list[LintResult]:
-        """Find resources that share the same label."""
-        issues = []
+        """Find resources of the same entity type sharing a label (case-insensitive, per language)."""
+        issues: list[LintResult] = []
 
-        # Build map of label → list of resource IRIs
-        label_to_resources: dict[str, list[str]] = defaultdict(list)
+        # Group by (entity_type, label_lower, lang) → list of resource IRIs.
+        # Skip resources whose entity_type is "other" — we only group concrete
+        # types that the schema knows how to navigate.
+        groups: dict[tuple[str, str, str | None], list[str]] = defaultdict(list)
+        # Track one canonical display label per group key (first-seen wins) so the
+        # message reports the casing that goes with the matched group rather than
+        # whichever label happened to be iterated first for the subject.
+        original_label_for_group: dict[tuple[str, str, str | None], str] = {}
 
         for subject in self._uri_subjects:
+            etype = self._determine_entity_type(graph, subject)
+            if etype == "other":
+                continue
             for label in graph.objects(subject, RDFS.label):
-                if isinstance(label, RDFLiteral):
-                    label_str = str(label).strip().lower()
-                    if label_str:  # Skip empty labels
-                        label_to_resources[label_str].append(str(subject))
+                if not isinstance(label, RDFLiteral):
+                    continue
+                label_str = str(label).strip()
+                if not label_str:
+                    continue
+                lang_key = label.language.lower() if label.language else None
+                key = (etype, label_str.lower(), lang_key)
+                subj_iri = str(subject)
+                if subj_iri not in groups[key]:
+                    groups[key].append(subj_iri)
+                original_label_for_group.setdefault(key, label_str)
 
-        # Report duplicates
         reported_iris: set[str] = set()
-        for _label_str, resource_iris in label_to_resources.items():
-            if len(resource_iris) > 1:
-                for resource_iri in resource_iris:
-                    if resource_iri not in reported_iris:
-                        reported_iris.add(resource_iri)
-                        # Get original (non-lowercased) label
-                        original_label = self._get_label(graph, URIRef(resource_iri))
-                        other_resources = [c for c in resource_iris if c != resource_iri]
-                        issues.append(
-                            LintResult(
-                                issue_type=LintIssueType.WARNING.value,
-                                rule_id="duplicate-label",
-                                message=f"Label '{original_label}' is shared with {len(other_resources)} other resource(s)",
-                                subject_iri=resource_iri,
-                                subject_type=self._determine_entity_type(
-                                    graph, URIRef(resource_iri)
-                                ),
-                                details={
-                                    "local_name": self._get_local_name(URIRef(resource_iri)),
-                                    "label": original_label,
-                                    "duplicate_iris": other_resources[:5],  # Limit to 5
-                                    "total_duplicates": len(other_resources),
-                                },
-                            )
-                        )
-
+        for (etype, _lower, lang), iris in groups.items():
+            if len(iris) < 2:
+                continue
+            shown_label = original_label_for_group[(etype, _lower, lang)]
+            for iri in iris:
+                if iri in reported_iris:
+                    continue
+                reported_iris.add(iri)
+                others = [o for o in iris if o != iri]
+                lang_str = f"@{lang}" if lang else ""
+                issues.append(
+                    LintResult(
+                        issue_type=LintIssueType.WARNING.value,
+                        rule_id="duplicate-label",
+                        message=(
+                            f'Label "{shown_label}"{lang_str} is shared with '
+                            f"{len(others)} other resource(s) of the same type"
+                        ),
+                        subject_iri=iri,
+                        subject_type=etype,
+                        details={
+                            "local_name": self._get_local_name(URIRef(iri)),
+                            "label": shown_label,
+                            "language": lang,
+                            "duplicate_iris": others[:5],
+                            "total_duplicates": len(others),
+                        },
+                    )
+                )
         return issues
 
     async def _check_label_per_language(self, graph: Graph) -> list[LintResult]:
@@ -1293,6 +1394,191 @@ class OntologyLinter:
                 )
 
         return issues
+
+    async def _check_unused_property(self, graph: Graph) -> list[LintResult]:
+        """Find declared properties that are never used as a predicate."""
+        issues: list[LintResult] = []
+        property_types = (
+            OWL.ObjectProperty,
+            OWL.DatatypeProperty,
+            OWL.AnnotationProperty,
+            RDF.Property,
+        )
+        seen: set[URIRef] = set()
+        for prop_type in property_types:
+            for prop in graph.subjects(RDF.type, prop_type):
+                if not isinstance(prop, URIRef) or prop in seen:
+                    continue
+                seen.add(prop)
+                # `graph.subjects(prop, None)` returns subjects of triples where `prop`
+                # is the predicate. We exclude the property itself as a subject to avoid
+                # treating a self-referential triple like (prop, prop, X) as evidence
+                # that prop is "used" in any meaningful sense.
+                used = any(s != prop for s in graph.subjects(prop, None))
+                if not used:
+                    issues.append(
+                        LintResult(
+                            issue_type=LintIssueType.WARNING.value,
+                            rule_id="unused-property",
+                            message="Property is declared but never used as a predicate",
+                            subject_iri=str(prop),
+                            subject_type="property",
+                            details={"local_name": self._get_local_name(prop)},
+                        )
+                    )
+        return issues
+
+    async def _check_orphan_individual(self, graph: Graph) -> list[LintResult]:
+        """Flag individuals whose rdf:type target is not declared as owl:Class or rdfs:Class."""
+        issues: list[LintResult] = []
+        declared_classes = self._class_subjects(graph)
+        # owl:Thing is implicitly a class even if not declared.
+        declared_classes.add(OWL.Thing)
+
+        # Dedup subjects since graph.subjects(RDF.type, None) may yield the
+        # same subject multiple times when it has multiple rdf:type values.
+        seen_individuals: set[URIRef] = set()
+        for ind in graph.subjects(RDF.type, None):
+            if not isinstance(ind, URIRef) or ind in seen_individuals:
+                continue
+            seen_individuals.add(ind)
+            # Skip subjects that are themselves classes, properties, or untyped —
+            # _determine_entity_type returns "individual" only for resources that
+            # have an rdf:type but aren't declared as a class or property.
+            if self._determine_entity_type(graph, ind) != "individual":
+                continue
+            for type_target in graph.objects(ind, RDF.type):
+                if not isinstance(type_target, URIRef):
+                    continue
+                if type_target == OWL.NamedIndividual:
+                    continue
+                if type_target in declared_classes:
+                    continue
+                issues.append(
+                    LintResult(
+                        issue_type=LintIssueType.WARNING.value,
+                        rule_id="orphan-individual",
+                        message=f"Individual's type {type_target} is not declared as owl:Class",
+                        subject_iri=str(ind),
+                        subject_type="individual",
+                        details={
+                            "local_name": self._get_local_name(ind),
+                            "undeclared_type": str(type_target),
+                            "undeclared_type_local": self._get_local_name(type_target),
+                        },
+                    )
+                )
+        return issues
+
+    async def _check_empty_domain(self, graph: Graph) -> list[LintResult]:
+        """Flag ObjectProperty/DatatypeProperty declarations with no rdfs:domain."""
+        issues: list[LintResult] = []
+        for prop_type in (OWL.ObjectProperty, OWL.DatatypeProperty):
+            for prop in graph.subjects(RDF.type, prop_type):
+                if not isinstance(prop, URIRef):
+                    continue
+                if any(graph.objects(prop, RDFS.domain)):
+                    continue
+                issues.append(
+                    LintResult(
+                        issue_type=LintIssueType.INFO.value,
+                        rule_id="empty-domain",
+                        message="Property has no rdfs:domain",
+                        subject_iri=str(prop),
+                        subject_type="property",
+                        details={"local_name": self._get_local_name(prop)},
+                    )
+                )
+        return issues
+
+    async def _check_empty_range(self, graph: Graph) -> list[LintResult]:
+        """Flag ObjectProperty/DatatypeProperty declarations with no rdfs:range."""
+        issues: list[LintResult] = []
+        for prop_type in (OWL.ObjectProperty, OWL.DatatypeProperty):
+            for prop in graph.subjects(RDF.type, prop_type):
+                if not isinstance(prop, URIRef):
+                    continue
+                if any(graph.objects(prop, RDFS.range)):
+                    continue
+                issues.append(
+                    LintResult(
+                        issue_type=LintIssueType.INFO.value,
+                        rule_id="empty-range",
+                        message="Property has no rdfs:range",
+                        subject_iri=str(prop),
+                        subject_type="property",
+                        details={"local_name": self._get_local_name(prop)},
+                    )
+                )
+        return issues
+
+    async def _check_deprecated_parent(self, graph: Graph) -> list[LintResult]:
+        """Flag classes that subclass an owl:deprecated class."""
+        issues: list[LintResult] = []
+        for cls in self._class_subjects(graph):
+            if not isinstance(cls, URIRef):
+                continue
+            for parent in graph.objects(cls, RDFS.subClassOf):
+                if not isinstance(parent, URIRef):
+                    continue
+                if not is_deprecated(graph, parent):
+                    continue
+                issues.append(
+                    LintResult(
+                        issue_type=LintIssueType.WARNING.value,
+                        rule_id="deprecated-parent",
+                        message=f"Parent class {parent} is deprecated",
+                        subject_iri=str(cls),
+                        subject_type="class",
+                        details={
+                            "local_name": self._get_local_name(cls),
+                            "deprecated_parent": str(parent),
+                            "deprecated_parent_local": self._get_local_name(parent),
+                        },
+                    )
+                )
+        return issues
+
+    async def _check_multi_root(self, graph: Graph) -> list[LintResult]:
+        """Fire once if the ontology has more than 5 root classes."""
+        root_iris: list[str] = []
+        for cls in self._class_subjects(graph):
+            if not isinstance(cls, URIRef) or cls == OWL.Thing:
+                continue
+            has_real_parent = any(
+                isinstance(p, URIRef) and p != OWL.Thing
+                for p in graph.objects(cls, RDFS.subClassOf)
+            )
+            if not has_real_parent:
+                root_iris.append(str(cls))
+
+        if len(root_iris) <= 5:
+            return []
+
+        return [
+            LintResult(
+                issue_type=LintIssueType.INFO.value,
+                rule_id="multi-root",
+                message=f"Ontology has {len(root_iris)} root classes (classes with no parent)",
+                subject_iri=None,
+                subject_type="other",
+                details={
+                    "root_count": len(root_iris),
+                    # Cap at 20 to keep the payload small even on huge ontologies.
+                    "root_iris": sorted(root_iris)[:20],
+                },
+            )
+        ]
+
+    @staticmethod
+    def _class_subjects(graph: Graph) -> set[URIRef]:
+        """Return all URIRef subjects declared as owl:Class or rdfs:Class."""
+        classes: set[URIRef] = set()
+        for cls_type in (OWL.Class, RDFS.Class):
+            for cls in graph.subjects(RDF.type, cls_type):
+                if isinstance(cls, URIRef):
+                    classes.add(cls)
+        return classes
 
     @staticmethod
     def _determine_entity_type(graph: Graph, uri: URIRef) -> str:
