@@ -1,7 +1,7 @@
 """Add anonymous suggestion fields to suggestion_sessions.
 
 Revision ID: t8u9v0w1x2y3
-Revises: s7t8u9v0w1x2
+Revises: 47cc27515626
 Create Date: 2026-04-03
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "t8u9v0w1x2y3"
-down_revision = "v9w0x1y2z3a4"
+down_revision = "47cc27515626"
 branch_labels = None
 depends_on = None
 
