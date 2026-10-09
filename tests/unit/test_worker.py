@@ -965,10 +965,12 @@ class TestAutoSubmitStaleSuggestions:
         with patch("ontokit.services.suggestion_service.SuggestionService") as mock_cls:
             mock_svc = mock_cls.return_value
             mock_svc.auto_submit_stale_sessions = AsyncMock(return_value=3)
+            mock_svc.reap_stale_anonymous_sessions = AsyncMock(return_value=2)
 
             result = await auto_submit_stale_suggestions(mock_ctx)
 
         assert result["auto_submitted"] == 3
+        assert result["anonymous_reaped"] == 2
 
     @pytest.mark.asyncio
     async def test_auto_submit_failure_reraises(self, mock_ctx: dict[str, Any]) -> None:

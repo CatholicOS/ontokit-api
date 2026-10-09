@@ -80,6 +80,11 @@ class Settings(BaseSettings):
     frontend_url: str = ""  # e.g. http://localhost:3000
     revalidation_secret: str = ""  # shared secret for sitemap revalidation
 
+    # Auth mode: "required" (default), "optional" (browse without login, sign in for editing), "disabled" (no auth)
+    # Literal (not bare str) so pydantic-settings rejects typos at startup instead of
+    # silently falling through to required behavior (/ce:review MEDIUM, PR-2).
+    auth_mode: Literal["required", "optional", "disabled"] = "required"
+
     # Superadmin - comma-separated list of user IDs with full system access
     superadmin_user_ids: str = ""
 
