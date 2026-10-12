@@ -10,6 +10,8 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from ontokit.core.anonymous_token import create_anonymous_token
+
 if TYPE_CHECKING:
     from ontokit.models.pull_request import PullRequest
 
@@ -24,6 +26,11 @@ from ontokit.core.beacon_token import create_beacon_token, verify_beacon_token
 from ontokit.git import GitRepositoryService, get_git_service
 from ontokit.models.project import Project
 from ontokit.models.suggestion_session import SuggestionSession, SuggestionSessionStatus
+from ontokit.schemas.anonymous_suggestion import (
+    AnonymousSessionCreateResponse,
+    AnonymousSubmitRequest,
+    AnonymousSubmitResponse,
+)
 from ontokit.schemas.pull_request import PRCreate
 from ontokit.schemas.suggestion import (
     SuggestionBeaconRequest,
@@ -388,7 +395,15 @@ class SuggestionService:
         body_parts.append(f"\n**Entities modified** ({session.changes_count} changes):")
         for entity in entities:
             body_parts.append(f"- {entity}")
-        body_parts.append(f"\n*Submitted by {session.user_name or session.user_id}*")
+        is_anonymous = getattr(session, "is_anonymous", False)
+        if is_anonymous:
+            submitter_name = getattr(session, "submitter_name", None)
+            if submitter_name:
+                body_parts.append(f"\n*Submitted by {submitter_name}*")
+            else:
+                body_parts.append("\n*Submitted anonymously*")
+        else:
+            body_parts.append(f"\n*Submitted by {session.user_name or session.user_id}*")
         description = "\n".join(body_parts)
 
         # Check for an existing PR on this branch (idempotency on retry)
@@ -530,7 +545,17 @@ class SuggestionService:
                 pr_url = pr.github_pr_url if hasattr(pr, "github_pr_url") else None
                 github_pr_url = pr_url
 
-        submitter = SuggestionUser(id=s.user_id, name=s.user_name, email=s.user_email)
+        # For anonymous sessions, prefer submitter_name/email (credit info collected at submit)
+        # over the generic user_name/email set at session creation.
+        is_anonymous = getattr(s, "is_anonymous", False)
+        if is_anonymous:
+            submitter_name = getattr(s, "submitter_name", None) or s.user_name or "Anonymous"
+            submitter_email = getattr(s, "submitter_email", None) or s.user_email
+        else:
+            submitter_name = s.user_name
+            submitter_email = s.user_email
+
+        submitter = SuggestionUser(id=s.user_id, name=submitter_name, email=submitter_email)
         reviewer = None
         if s.reviewer_id:
             reviewer = SuggestionUser(
@@ -553,6 +578,7 @@ class SuggestionService:
             reviewed_at=s.reviewed_at,
             revision=s.revision,
             summary=s.summary,
+            is_anonymous=is_anonymous,
         )
 
     def _can_review(self, role: str | None, user: CurrentUser) -> bool:
@@ -788,6 +814,42 @@ class SuggestionService:
         )
         await self._verify_project_access(project_id, session_user)
 
+        await self._beacon_flush(project_id, session, data)
+
+    async def beacon_save_anonymous(
+        self, project_id: UUID, data: SuggestionBeaconRequest, verified_session_id: str
+    ) -> None:
+        """Handle a beacon save for an ANONYMOUS session.
+
+        The caller (route) has already verified the X-Anonymous-Token; this
+        method binds it to the payload's session and re-checks the session is
+        actually anonymous (an anonymous token must never flush an
+        authenticated user's session). No user-identity access re-check: the
+        session's project is public by construction (create-time gate).
+        """
+        if verified_session_id != data.session_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Token does not match session",
+            )
+
+        session = await self._get_session(project_id, data.session_id)
+
+        if not session.is_anonymous:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Session is not an anonymous session",
+            )
+
+        if session.status != SuggestionSessionStatus.ACTIVE.value:
+            return  # Silently ignore saves to non-active sessions
+
+        await self._beacon_flush(project_id, session, data)
+
+    async def _beacon_flush(
+        self, project_id: UUID, session: SuggestionSession, data: SuggestionBeaconRequest
+    ) -> None:
+        """Commit a beacon payload to the session branch (fire-and-forget)."""
         project = await self._get_project(project_id)
         filename = self._get_git_ontology_path(project)
 
@@ -812,6 +874,264 @@ class SuggestionService:
             session.last_activity = datetime.now(UTC)
             await self.db.commit()
 
+    # --- Anonymous session methods ---
+
+    async def create_anonymous_session(
+        self, project_id: UUID, client_ip: str
+    ) -> AnonymousSessionCreateResponse:
+        """Create an anonymous suggestion session with rate limiting.
+
+        Checks that fewer than 5 anonymous sessions have been created from
+        the same IP address in the last hour before creating a new one.
+        """
+        from sqlalchemy import func as sa_func
+
+        # Verify project exists AND is public — anonymous users must never be
+        # able to create suggestion branches/PRs against a private project.
+        project = await self._get_project(project_id)
+        if not project.is_public:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Anonymous suggestions are only available on public projects",
+            )
+
+        # Rate limit check: max 5 anonymous sessions per IP per hour — GLOBAL
+        # across projects on purpose. Scoping by project would let one IP mint
+        # 5 sessions (and git branches) on every public project per hour.
+        cutoff = datetime.now(UTC) - timedelta(hours=1)
+        rate_result = await self.db.execute(
+            select(sa_func.count(SuggestionSession.id)).where(
+                SuggestionSession.is_anonymous.is_(True),
+                SuggestionSession.client_ip == client_ip,
+                SuggestionSession.created_at > cutoff,
+            )
+        )
+        session_count = rate_result.scalar() or 0
+        if session_count >= 5:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded. Try again later.",
+            )
+
+        # Generate identifiers
+        session_id = f"s_{secrets.token_hex(8)}"
+        branch = f"suggest/anonymous/{session_id}"
+        anonymous_token = create_anonymous_token(session_id)
+        beacon_token = create_beacon_token(session_id)
+        anon_user_id = f"anonymous-{secrets.token_hex(6)}"
+
+        # Create the git branch
+        try:
+            self.git_service.create_branch(project_id, branch)
+        except Exception as e:
+            logger.error(f"Failed to create anonymous suggestion branch: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create suggestion branch",
+            ) from e
+
+        # Create the database record
+        db_session = SuggestionSession(
+            project_id=project_id,
+            user_id=anon_user_id,
+            user_name="Anonymous",
+            user_email=None,
+            session_id=session_id,
+            branch=branch,
+            beacon_token=beacon_token,
+            is_anonymous=True,
+            client_ip=client_ip,
+        )
+        try:
+            self.db.add(db_session)
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            try:
+                self.git_service.delete_branch(project_id, branch, force=True)
+            except Exception:
+                logger.warning(f"Failed to clean up orphaned anonymous branch {branch}")
+            raise
+
+        try:
+            await self.db.refresh(db_session)
+        except Exception:
+            logger.warning("Anonymous session %s committed but refresh failed", session_id)
+            re_result = await self.db.execute(
+                select(SuggestionSession).where(
+                    SuggestionSession.project_id == project_id,
+                    SuggestionSession.session_id == session_id,
+                )
+            )
+            db_session = re_result.scalar_one()
+
+        return AnonymousSessionCreateResponse(
+            session_id=db_session.session_id,
+            branch=db_session.branch,
+            created_at=db_session.created_at,
+            anonymous_token=anonymous_token,
+        )
+
+    async def save_anonymous(
+        self,
+        project_id: UUID,
+        session_id: str,
+        data: SuggestionSaveRequest,
+        verified_session_id: str,
+    ) -> SuggestionSaveResponse:
+        """Save content to an anonymous suggestion session branch."""
+        session = await self._get_session(project_id, session_id)
+
+        # Verify the token belongs to this session
+        if verified_session_id != session.session_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Token does not match session",
+            )
+        if not session.is_anonymous:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Session is not an anonymous session",
+            )
+        if session.status != SuggestionSessionStatus.ACTIVE.value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Session is {session.status}, cannot save",
+            )
+
+        project = await self._get_project(project_id)
+        filename = self._get_git_ontology_path(project)
+
+        async with _branch_locks[session.branch]:
+            commit_message = f"Update {data.entity_label}"
+            try:
+                commit_info = self.git_service.commit_to_branch(  # type: ignore[attr-defined]
+                    project_id=project_id,
+                    branch_name=session.branch,
+                    ontology_content=data.content.encode("utf-8"),
+                    filename=filename,
+                    message=commit_message,
+                    author_name=session.user_name or "Anonymous",
+                    author_email=session.user_email or "anonymous@ontokit.dev",
+                )
+            except Exception as e:
+                logger.error(f"Failed to save anonymous suggestion: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to save suggestion to branch",
+                ) from e
+
+            session.changes_count += 1
+            self._update_entities_modified(session, data.entity_label)
+            session.last_activity = datetime.now(UTC)
+            try:
+                await self.db.commit()
+            except Exception as e:
+                await self.db.rollback()
+                logger.error(
+                    "Failed to update anonymous session metadata: session=%s error=%s",
+                    session.session_id,
+                    e,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Saved to branch but failed to update session metadata",
+                ) from e
+
+        return SuggestionSaveResponse(
+            commit_hash=commit_info.hash,
+            branch=session.branch,
+            changes_count=session.changes_count,
+        )
+
+    async def submit_anonymous(
+        self,
+        project_id: UUID,
+        session_id: str,
+        data: AnonymousSubmitRequest,
+        verified_session_id: str,
+    ) -> AnonymousSubmitResponse:
+        """Submit an anonymous suggestion session as a pull request."""
+        session = await self._get_session(project_id, session_id)
+
+        if verified_session_id != session.session_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Token does not match session",
+            )
+        if not session.is_anonymous:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Session is not an anonymous session",
+            )
+        if session.status != SuggestionSessionStatus.ACTIVE.value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Session is {session.status}, cannot submit",
+            )
+        if session.changes_count == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No changes to submit",
+            )
+
+        # Store optional credit info
+        if data.submitter_name or data.submitter_email:
+            session.submitter_name = data.submitter_name
+            session.submitter_email = data.submitter_email
+            # Update user_name so the PR description shows the provided credit name
+            session.user_name = data.submitter_name or "Anonymous"
+
+        mock_user = CurrentUser(
+            id=session.user_id,
+            name=session.user_name or "Anonymous",
+            email=session.submitter_email,
+        )
+
+        result = await self._create_pr_for_session(
+            project_id, session, mock_user, data.summary, "submitted"
+        )
+
+        return AnonymousSubmitResponse(
+            pr_number=result.pr_number,
+            pr_url=result.pr_url,
+            status=result.status,
+        )
+
+    async def discard_anonymous(
+        self,
+        project_id: UUID,
+        session_id: str,
+        verified_session_id: str,
+    ) -> None:
+        """Discard an anonymous suggestion session and delete its branch."""
+        session = await self._get_session(project_id, session_id)
+
+        if verified_session_id != session.session_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Token does not match session",
+            )
+        if not session.is_anonymous:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Session is not an anonymous session",
+            )
+        if session.status != SuggestionSessionStatus.ACTIVE.value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Session is {session.status}, cannot discard",
+            )
+
+        try:
+            self.git_service.delete_branch(project_id, session.branch, force=True)
+        except Exception as e:
+            logger.warning(f"Failed to delete anonymous suggestion branch {session.branch}: {e}")
+
+        session.status = SuggestionSessionStatus.DISCARDED.value
+        session.last_activity = datetime.now(UTC)
+        await self.db.commit()
+
     async def auto_submit_stale_sessions(self) -> int:
         """Auto-create PRs for stale suggestion sessions.
 
@@ -824,6 +1144,11 @@ class SuggestionService:
                 SuggestionSession.status == SuggestionSessionStatus.ACTIVE.value,
                 SuggestionSession.changes_count > 0,
                 SuggestionSession.last_activity < cutoff,
+                # Anonymous sessions are handled by reap_stale_anonymous_sessions:
+                # their pseudo-user is never a project member, so the access
+                # re-check below would always discard them WITHOUT deleting the
+                # branch (orphaned-branch leak).
+                SuggestionSession.is_anonymous.is_(False),
             )
         )
         stale_sessions = result.scalars().all()
@@ -840,6 +1165,7 @@ class SuggestionService:
                     SuggestionSession.status == SuggestionSessionStatus.ACTIVE.value,
                     SuggestionSession.changes_count > 0,
                     SuggestionSession.last_activity < cutoff,
+                    SuggestionSession.is_anonymous.is_(False),
                 )
                 .values(status=SuggestionSessionStatus.AUTO_SUBMITTED.value)
             )
@@ -891,6 +1217,64 @@ class SuggestionService:
                     logger.error(
                         f"Failed to revert session {session.session_id} to ACTIVE: {revert_err}"
                     )
+
+        return count
+
+    async def reap_stale_anonymous_sessions(self, ttl_hours: int = 24) -> int:
+        """Discard stale ANONYMOUS sessions and delete their git branches.
+
+        Anonymous tokens expire after 24h, so past the TTL the session is
+        unreachable by its creator anyway. Without this reaper every abandoned
+        anonymous session leaves an orphaned git branch forever (the authed
+        sweep can't handle them: the anonymous pseudo-user is never a project
+        member). Includes sessions with changes_count == 0 — those were never
+        matched by any sweep at all.
+
+        Returns the number of sessions reaped.
+        """
+        cutoff = datetime.now(UTC) - timedelta(hours=ttl_hours)
+
+        result = await self.db.execute(
+            select(SuggestionSession).where(
+                SuggestionSession.status == SuggestionSessionStatus.ACTIVE.value,
+                SuggestionSession.is_anonymous.is_(True),
+                SuggestionSession.last_activity < cutoff,
+            )
+        )
+        stale = result.scalars().all()
+
+        count = 0
+        for session in stale:
+            # Atomic claim (same pattern as auto_submit_stale_sessions)
+            claim_result = await self.db.execute(
+                update(SuggestionSession)
+                .where(
+                    SuggestionSession.id == session.id,
+                    SuggestionSession.status == SuggestionSessionStatus.ACTIVE.value,
+                    SuggestionSession.is_anonymous.is_(True),
+                    SuggestionSession.last_activity < cutoff,
+                )
+                .values(status=SuggestionSessionStatus.DISCARDED.value)
+            )
+            if claim_result.rowcount != 1:  # type: ignore[attr-defined]
+                continue
+            await self.db.commit()
+
+            try:
+                self.git_service.delete_branch(session.project_id, session.branch, force=True)
+            except Exception as e:
+                # Branch may already be gone; log and keep the discard.
+                logger.warning(
+                    "Reaped anonymous session %s but branch delete failed: %s",
+                    session.session_id,
+                    e,
+                )
+            count += 1
+            logger.info(
+                "Reaped stale anonymous session %s (changes_count=%s)",
+                session.session_id,
+                session.changes_count,
+            )
 
         return count
 

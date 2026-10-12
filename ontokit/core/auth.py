@@ -68,6 +68,15 @@ class CurrentUser(BaseModel):
         return self.id in settings.superadmin_ids
 
 
+# Anonymous user returned when auth is disabled
+ANONYMOUS_USER = CurrentUser(
+    id="anonymous",
+    email=None,
+    name="Anonymous",
+    username="anonymous",
+    roles=["viewer"],
+)
+
 # Cache for JWKS (JSON Web Key Set) with TTL
 _jwks_cache: dict[str, Any] | None = None
 _jwks_cache_time: float = 0.0
@@ -259,6 +268,10 @@ async def get_current_user(
 
     Raises 401 if not authenticated.
     """
+    if settings.auth_mode == "disabled":
+        return ANONYMOUS_USER
+    # "optional" mode: still require auth for RequiredUser (401 if no credentials)
+    # "required" mode: existing behavior (401 if no credentials)
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -300,6 +313,10 @@ async def get_current_user_optional(
 
     Useful for endpoints that work differently for authenticated vs anonymous users.
     """
+    if settings.auth_mode == "disabled":
+        return ANONYMOUS_USER
+    # "optional" mode: existing behavior — returns None if no credentials, real user if valid token
+    # "required" mode: existing behavior
     if credentials is None:
         return None
 
@@ -318,6 +335,9 @@ async def get_current_user_with_token(
     Raises 401 if not authenticated.
     Returns tuple of (CurrentUser, access_token).
     """
+    if settings.auth_mode == "disabled":
+        return ANONYMOUS_USER, "anonymous"
+    # "optional" and "required" modes: existing behavior (401 if no credentials)
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
