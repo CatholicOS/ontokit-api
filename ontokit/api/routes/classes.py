@@ -97,26 +97,3 @@ async def delete_class(
     deleted = await service.delete_class(ontology_id, class_iri)
     if not deleted:
         raise HTTPException(status_code=404, detail="Class not found")
-
-
-@router.get("/ontologies/{ontology_id}/classes/{class_iri:path}/hierarchy")
-async def get_class_hierarchy(
-    ontology_id: UUID,
-    class_iri: str,
-    service: Annotated[OntologyService, Depends(get_ontology_service)],
-    direction: str = "both",
-    depth: int = 3,
-) -> dict[str, object]:
-    """
-    Get the class hierarchy around a specific class.
-
-    Args:
-        direction: 'ancestors', 'descendants', or 'both'
-        depth: Maximum depth to traverse
-    """
-    return await service.get_class_hierarchy(
-        ontology_id,
-        class_iri,
-        direction=direction,
-        depth=depth,
-    )
