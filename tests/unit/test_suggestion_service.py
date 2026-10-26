@@ -77,6 +77,11 @@ def _make_session(
     session.reviewed_at = None
     session.revision = 1
     session.summary = None
+    # Anonymous-suggestion columns (PR-7): authenticated session defaults
+    session.is_anonymous = False
+    session.submitter_name = None
+    session.submitter_email = None
+    session.client_ip = None
     session.created_at = datetime.now(UTC)
     session.last_activity = last_activity or datetime.now(UTC)
     return session
