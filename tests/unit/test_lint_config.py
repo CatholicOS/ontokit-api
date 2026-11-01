@@ -42,7 +42,7 @@ class TestLintLevels:
     def test_level_1_critical_rules(self) -> None:
         """Level 1 contains only critical structural rules."""
         rules = get_rules_for_level(1)
-        assert rules == {"undefined-parent", "circular-hierarchy", "undefined-prefix"}
+        assert rules == {"dangling-ref", "circular-hierarchy", "undefined-prefix"}
 
     def test_level_2_includes_level_1(self) -> None:
         """Level 2 is a superset of level 1."""
