@@ -1,0 +1,30 @@
+# Garage single-node configuration for local development.
+#
+# Garage is an S3-compatible object store (replaces MinIO, which was pulled
+# from Docker Hub when its open-source edition was archived).
+#
+# The secrets below are safe for local development ONLY. For production,
+# override `rpc_secret` and `admin_token` via a separate mounted config or
+# a dedicated `garage.prod.toml` with values from your secret store.
+# Generate real secrets with: openssl rand -hex 32
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+
+db_engine = "lmdb"
+
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "garage:3901"
+rpc_secret = "ac6d4e45fe7f3d60a10bd20d46a0a3ca0e77f8c5c6a4ed9b19c32d49e1e42fa0"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.garage.localhost"
+
+[admin]
+api_bind_addr = "[::]:3903"
+admin_token = "dev-admin-token-not-for-production"
+metrics_token = "dev-metrics-token-not-for-production"

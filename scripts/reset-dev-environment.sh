@@ -49,7 +49,7 @@ echo -e "${BLUE}Step 2: Removing Docker volumes...${NC}"
 PROJECT_NAME=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')
 
 # Remove volumes (try both naming conventions)
-for volume in postgres_data redis_data minio_data zitadel_data git_repos; do
+for volume in postgres_data redis_data garage_data zitadel_data git_repos; do
     docker volume rm "${PROJECT_NAME}_${volume}" 2>/dev/null && echo "  Removed ${PROJECT_NAME}_${volume}" || true
     docker volume rm "ontokit-api_${volume}" 2>/dev/null && echo "  Removed ontokit-api_${volume}" || true
 done

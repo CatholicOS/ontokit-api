@@ -56,26 +56,48 @@ services:
       - ontokit
 
   # ============================================================================
-  # MinIO for object storage
+  # Garage S3-compatible object storage (replaces MinIO).
+  #
+  # Production notes:
+  #   - Override the dev `rpc_secret` and `admin_token` in scripts/garage.toml
+  #     (or mount a prod-specific config) before deploying. Generate real
+  #     values with `openssl rand -hex 32`.
+  #   - S3_ACCESS_KEY and S3_SECRET_KEY must be set in the environment; they
+  #     are the credentials the app uses to authenticate against Garage.
   # ============================================================================
-  minio:
-    image: minio/minio:latest
-    container_name: ontokit-minio
+  garage:
+    image: dxflrs/garage:v1.1.0
+    container_name: ontokit-garage
     restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio123}
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "${S3_API_PORT:-9000}:3900"
+      - "${S3_ADMIN_PORT:-3903}:3903"
     volumes:
-      - minio_data:/data
+      - garage_data:/var/lib/garage
+      - ./scripts/garage.toml:/etc/garage.toml:ro
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "/garage", "status"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+    networks:
+      - ontokit
+
+  garage-init:
+    image: dxflrs/garage:v1.1.0
+    container_name: ontokit-garage-init
+    entrypoint: ["/bin/sh", "/scripts/init-garage.sh"]
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY must be set}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY must be set}
+      S3_BUCKET: ${S3_BUCKET:-ontokit}
+    volumes:
+      - ./scripts/garage.toml:/etc/garage.toml:ro
+      - ./scripts/init-garage.sh:/scripts/init-garage.sh:ro
+    depends_on:
+      garage:
+        condition: service_healthy
+    restart: "no"
     networks:
       - ontokit
 
@@ -186,5 +208,5 @@ networks:
 volumes:
   postgres_data:
   redis_data:
-  minio_data:
+  garage_data:
   zitadel_data:
