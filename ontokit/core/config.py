@@ -45,8 +45,8 @@ class Settings(BaseSettings):
 
     # MinIO / S3
     minio_endpoint: str = "localhost:9000"
-    minio_access_key: str = "minio"
-    minio_secret_key: str = "minio123"
+    minio_access_key: str = "ontokitdevaccesskey"
+    minio_secret_key: str = "ontokitdevsecretkey"
     minio_bucket: str = "ontokit"
     minio_secure: bool = False
 

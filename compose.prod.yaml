@@ -56,26 +56,70 @@ services:
       - ontokit
 
   # ============================================================================
-  # MinIO for object storage
+  # Garage S3-compatible object storage (replaces MinIO).
+  #
+  # Production notes (all required, no defaults — compose will refuse to
+  # start without them):
+  #   - GARAGE_RPC_SECRET and GARAGE_ADMIN_TOKEN: unique per-deployment
+  #     secrets (openssl rand -hex 32). These override the dev values
+  #     hard-coded in scripts/garage.toml at runtime; do NOT reuse the
+  #     committed dev values in prod.
+  #   - S3_ACCESS_KEY / S3_SECRET_KEY: the app credentials Garage mints
+  #     for this deployment. Must match MINIO_ACCESS_KEY / MINIO_SECRET_KEY
+  #     in the app's environment.
+  #
+  # The admin port is bound to loopback only; use SSH port-forwarding or
+  # `docker exec` for admin operations instead of exposing it publicly.
   # ============================================================================
-  minio:
-    image: minio/minio:latest
-    container_name: ontokit-minio
+  garage:
+    image: dxflrs/garage:v2.5.0
+    container_name: ontokit-garage
     restart: unless-stopped
-    command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio123}
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?GARAGE_RPC_SECRET must be set (openssl rand -hex 32)}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:?GARAGE_ADMIN_TOKEN must be set (openssl rand -hex 32)}
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "${S3_API_PORT:-9000}:3900"
+      - "127.0.0.1:${S3_ADMIN_PORT:-3903}:3903"
     volumes:
-      - minio_data:/data
+      - garage_data:/var/lib/garage
+      - ./scripts/garage.toml:/etc/garage.toml:ro
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "/garage", "status"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+    networks:
+      - ontokit
+
+  # The dxflrs/garage image is FROM scratch (no shell), so the init image
+  # is built inline: alpine + the garage CLI copied from the server image.
+  garage-init:
+    build:
+      context: ./scripts
+      dockerfile_inline: |
+        FROM dxflrs/garage:v2.5.0 AS garage-bin
+        FROM alpine:3.21
+        COPY --from=garage-bin /garage /usr/local/bin/garage
+    image: ontokit/garage-init:v2.5.0
+    container_name: ontokit-garage-init
+    entrypoint: ["/bin/sh", "/scripts/init-garage.sh"]
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?GARAGE_RPC_SECRET must be set}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:?GARAGE_ADMIN_TOKEN must be set}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY must be set}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY must be set}
+      S3_BUCKET: ${S3_BUCKET:-ontokit}
+    volumes:
+      - ./scripts/garage.toml:/etc/garage.toml:ro
+      - ./scripts/init-garage.sh:/scripts/init-garage.sh:ro
+      # Shared read access to the garage metadata dir lets the CLI read
+      # the server's node_key and connect via RPC (CLI auth model).
+      - garage_data:/var/lib/garage:ro
+    depends_on:
+      garage:
+        condition: service_healthy
+    restart: "no"
     networks:
       - ontokit
 
@@ -186,5 +230,5 @@ networks:
 volumes:
   postgres_data:
   redis_data:
-  minio_data:
+  garage_data:
   zitadel_data:
