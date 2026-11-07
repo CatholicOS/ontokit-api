@@ -48,8 +48,15 @@ echo -e "${BLUE}Step 2: Removing Docker volumes...${NC}"
 # Get the compose project name (usually directory name)
 PROJECT_NAME=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')
 
-# Remove volumes (try both naming conventions)
-for volume in postgres_data redis_data garage_data zitadel_data git_repos; do
+# Also tear down a legacy ontokit-minio container if it lingers from a
+# pre-Garage checkout — `docker compose down` only removes services defined
+# in the current compose file, so the old minio container keeps its
+# minio_data volume attached otherwise.
+docker rm -f ontokit-minio 2>/dev/null && echo "  Removed legacy ontokit-minio container" || true
+
+# Remove volumes (try both naming conventions). `minio_data` is kept in
+# the list so devs upgrading from the MinIO stack get the orphan cleaned up.
+for volume in postgres_data redis_data garage_data minio_data zitadel_data git_repos; do
     docker volume rm "${PROJECT_NAME}_${volume}" 2>/dev/null && echo "  Removed ${PROJECT_NAME}_${volume}" || true
     docker volume rm "ontokit-api_${volume}" 2>/dev/null && echo "  Removed ontokit-api_${volume}" || true
 done

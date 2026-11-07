@@ -323,6 +323,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      garage-init:
+        condition: service_completed_successfully
 
   # ============================================================================
   # ARQ Worker (background task processing)
