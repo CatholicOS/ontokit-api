@@ -27,15 +27,20 @@ until $GARAGE status >/dev/null 2>&1; do
 done
 
 # 1. Layout: assign the single node to zone `dc1` with 1G capacity if no
-# role has been assigned yet.
+# role has been assigned yet. `layout show` prints "No nodes currently
+# have a role in the cluster." when nothing is staged or applied.
 if $GARAGE layout show 2>&1 | grep -q "No nodes currently have a role"; then
-    NODE_ID=$($GARAGE status | awk '/HEALTHY/ {print $1; exit}')
+    # Node IDs are 16 hex chars at the start of each row in the HEALTHY
+    # NODES table. The header rows don't match this pattern.
+    NODE_ID=$($GARAGE status 2>/dev/null | awk '/^[0-9a-f]{16}/ {print $1; exit}')
     if [ -z "$NODE_ID" ]; then
         echo "could not resolve garage node id" >&2
         exit 1
     fi
-    $GARAGE layout assign -z dc1 -c 1G "$NODE_ID"
-    LAYOUT_VERSION=$($GARAGE layout show | awk '/Staged/ {print $NF; exit}')
+    # `layout assign` prints the apply command on success, including the
+    # version to use. Capture it rather than guessing.
+    ASSIGN_OUT=$($GARAGE layout assign -z dc1 -c 1G "$NODE_ID" 2>&1)
+    LAYOUT_VERSION=$(echo "$ASSIGN_OUT" | awk '/apply --version/ {print $NF; exit}')
     $GARAGE layout apply --version "${LAYOUT_VERSION:-1}"
 fi
 

@@ -15,16 +15,16 @@ db_engine = "lmdb"
 
 replication_factor = 1
 
-rpc_bind_addr = "[::]:3901"
+rpc_bind_addr = "0.0.0.0:3901"
 rpc_public_addr = "garage:3901"
 rpc_secret = "ac6d4e45fe7f3d60a10bd20d46a0a3ca0e77f8c5c6a4ed9b19c32d49e1e42fa0"
 
 [s3_api]
 s3_region = "garage"
-api_bind_addr = "[::]:3900"
+api_bind_addr = "0.0.0.0:3900"
 root_domain = ".s3.garage.localhost"
 
 [admin]
-api_bind_addr = "[::]:3903"
+api_bind_addr = "0.0.0.0:3903"
 admin_token = "dev-admin-token-not-for-production"
 metrics_token = "dev-metrics-token-not-for-production"

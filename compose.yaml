@@ -75,7 +75,7 @@ services:
   # Replaces MinIO (archived from Docker Hub). See scripts/garage.toml.
   # ============================================================================
   garage:
-    image: dxflrs/garage:v1.1.0
+    image: dxflrs/garage:v2.5.0
     container_name: ontokit-garage
     restart: unless-stopped
     ports:
@@ -94,17 +94,32 @@ services:
 
   # One-shot: assign layout, create bucket, import the dev access key.
   # Idempotent; safe to re-run on every `docker compose up`.
+  #
+  # The dxflrs/garage image is FROM scratch (no shell), so the init image
+  # is built inline: alpine + the garage CLI copied from the server image.
   garage-init:
-    image: dxflrs/garage:v1.1.0
+    build:
+      context: ./scripts
+      dockerfile_inline: |
+        FROM dxflrs/garage:v2.5.0 AS garage-bin
+        FROM alpine:3.21
+        COPY --from=garage-bin /garage /usr/local/bin/garage
+    image: ontokit/garage-init:v2.5.0
     container_name: ontokit-garage-init
     entrypoint: ["/bin/sh", "/scripts/init-garage.sh"]
     environment:
-      S3_ACCESS_KEY: minio
-      S3_SECRET_KEY: minio123
+      # Garage requires access key IDs to be ≥8 characters; the old MinIO
+      # defaults ("minio" / "minio123") don't fit, so the dev stack uses
+      # 20-char credentials that are still obvious as dev-only placeholders.
+      S3_ACCESS_KEY: ontokitdevaccesskey
+      S3_SECRET_KEY: ontokitdevsecretkey
       S3_BUCKET: ontokit
     volumes:
       - ./scripts/garage.toml:/etc/garage.toml:ro
       - ./scripts/init-garage.sh:/scripts/init-garage.sh:ro
+      # Shared read access to the garage metadata dir lets the CLI read
+      # the server's node_key and connect via RPC (CLI auth model).
+      - garage_data:/var/lib/garage:ro
     depends_on:
       garage:
         condition: service_healthy
@@ -262,8 +277,8 @@ services:
       # Object storage (Garage, S3-compatible — var names kept as MINIO_*
       # to avoid a disruptive rename; they point at the Garage S3 endpoint).
       MINIO_ENDPOINT: garage:3900
-      MINIO_ACCESS_KEY: minio
-      MINIO_SECRET_KEY: minio123
+      MINIO_ACCESS_KEY: ontokitdevaccesskey
+      MINIO_SECRET_KEY: ontokitdevsecretkey
       MINIO_BUCKET: ontokit
       MINIO_SECURE: "false"
       # Zitadel
@@ -329,8 +344,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       # Object storage (Garage, S3-compatible — see api service above)
       MINIO_ENDPOINT: garage:3900
-      MINIO_ACCESS_KEY: minio
-      MINIO_SECRET_KEY: minio123
+      MINIO_ACCESS_KEY: ontokitdevaccesskey
+      MINIO_SECRET_KEY: ontokitdevsecretkey
       MINIO_BUCKET: ontokit
       MINIO_SECURE: "false"
       # Git Repository Storage

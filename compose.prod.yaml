@@ -66,7 +66,7 @@ services:
   #     are the credentials the app uses to authenticate against Garage.
   # ============================================================================
   garage:
-    image: dxflrs/garage:v1.1.0
+    image: dxflrs/garage:v2.5.0
     container_name: ontokit-garage
     restart: unless-stopped
     ports:
@@ -83,8 +83,16 @@ services:
     networks:
       - ontokit
 
+  # The dxflrs/garage image is FROM scratch (no shell), so the init image
+  # is built inline: alpine + the garage CLI copied from the server image.
   garage-init:
-    image: dxflrs/garage:v1.1.0
+    build:
+      context: ./scripts
+      dockerfile_inline: |
+        FROM dxflrs/garage:v2.5.0 AS garage-bin
+        FROM alpine:3.21
+        COPY --from=garage-bin /garage /usr/local/bin/garage
+    image: ontokit/garage-init:v2.5.0
     container_name: ontokit-garage-init
     entrypoint: ["/bin/sh", "/scripts/init-garage.sh"]
     environment:
@@ -94,6 +102,9 @@ services:
     volumes:
       - ./scripts/garage.toml:/etc/garage.toml:ro
       - ./scripts/init-garage.sh:/scripts/init-garage.sh:ro
+      # Shared read access to the garage metadata dir lets the CLI read
+      # the server's node_key and connect via RPC (CLI auth model).
+      - garage_data:/var/lib/garage:ro
     depends_on:
       garage:
         condition: service_healthy
