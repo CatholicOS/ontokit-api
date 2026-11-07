@@ -41,18 +41,16 @@ cd "$API_DIR"
 
 echo
 echo -e "${BLUE}Step 1: Stopping containers...${NC}"
-docker compose down
+# --remove-orphans scopes legacy-container cleanup (e.g. the pre-Garage
+# ontokit-minio container) to the CURRENT Compose project — containers
+# with the same name in other projects are left alone.
+docker compose down --remove-orphans
 
 echo
 echo -e "${BLUE}Step 2: Removing Docker volumes...${NC}"
-# Get the compose project name (usually directory name)
-PROJECT_NAME=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')
-
-# Also tear down a legacy ontokit-minio container if it lingers from a
-# pre-Garage checkout — `docker compose down` only removes services defined
-# in the current compose file, so the old minio container keeps its
-# minio_data volume attached otherwise.
-docker rm -f ontokit-minio 2>/dev/null && echo "  Removed legacy ontokit-minio container" || true
+# Honor COMPOSE_PROJECT_NAME the way Compose itself does; fall back to
+# the sanitized directory basename.
+PROJECT_NAME=${COMPOSE_PROJECT_NAME:-$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')}
 
 # Remove volumes (try both naming conventions). `minio_data` is kept in
 # the list so devs upgrading from the MinIO stack get the orphan cleaned up.
