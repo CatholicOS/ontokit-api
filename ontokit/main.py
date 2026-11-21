@@ -97,8 +97,8 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         storage = StorageService()
         await asyncio.wait_for(storage.ensure_bucket_exists(), timeout=15.0)
-        _startup_print(f"MinIO bucket '{settings.minio_bucket}' is ready")
-        logger.info("MinIO bucket '%s' is ready", settings.minio_bucket)
+        _startup_print(f"S3 bucket '{settings.minio_bucket}' is ready")
+        logger.info("S3 bucket '%s' is ready", settings.minio_bucket)
     except TimeoutError:
         _startup_print("MinIO bucket check timed out after 15s — continuing startup")
         logger.exception("MinIO bucket check timed out — continuing startup")
